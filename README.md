@@ -7,12 +7,19 @@ Tools
 Over-approximation based Static Analysis (α)
 -----------
 
-Using a control-flow graph representation of a Solidity smart contract we attempt to prove properties of smart contracts statically. This is constructed by considering every possible configuration of function calls. See ./StaticAnalysis/SCSemantics.hs
+Using a control-flow graph representation of a Solidity smart contract we attempt to prove properties (as symbolic automata, namely [Dynamic Event Automata or DEAs](https://github.com/gordonpace/contractlarva)) of smart contracts statically. This is constructed by considering every possible configuration of function calls. See ./StaticAnalysis/SCSemantics.hs
 
 Residual/Quotient Analysis (α)
 -----------
 
 The previous static analysis may fail, therefore we are developing methods to reduce from a property parts that can be proved safe using residual analysis, leaving a residual that we still have to prove against the smart contract. See ./StaticAnalysis/Residuals.hs
+
+Features:
+
+1. This contains utilities to perform a reachability reduction of a DEA (limited to DEAs with only bad states).
+2. Synchronous compositions of a DEA with a control-flow graph
+3. Residuals of a DEA against a control-flow graph
+4. (WIP) Residual of a DEA against a DEA (i.e. can be used to reduce the first DEA with what the second DEA ensures, so that we can just monitor the residual and the second DEA).
 
 Monitoring Smart Contracts (α)
 -----------
