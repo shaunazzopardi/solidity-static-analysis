@@ -20,6 +20,11 @@ Monitoring Smart Contracts (α)
 
 https://github.com/gordonpace/contractlarva monitors smart contracts for properties as symbolic automata by instrumenting smart contract with business logic of the properties. Here we are working on a tool to move this logic to its own smart contract, with the monitored smart contract calling this monitor upon a given event. See ./DEAToSC.hs and ./DEA/ParsingToSmartContract.hs
 
+Current limitations: 
+
+1. Instrumentation in original smart contract must be done manually (i.e. <i>call</i>s or <i>delegatecall</i>s to the respective event trigger method in the monitor smart contract).
+2. Event trigger methods in the monitor smart contract have untyped parameters that need to be manually typed.
+
 Partial Evaluator (experimental)
 -----------
 
