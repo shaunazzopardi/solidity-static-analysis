@@ -9,7 +9,7 @@ module StaticAnalysis.PartialEvaluator where
  import Data.Text.Lazy.Read
  import Data.Text.Lazy
 
- data UnknownOrValue a = Unknown --TODO update to include invariants
+ data UnknownOrValue a = Unknown --TODO update to include invariants, i.e. value that respects condition (Condition BoolExpr)
                         | V a deriving (Show, Eq, Ord)
 
  --TODO different sizes of Bytes (e.g. bytes4) and integer
@@ -18,7 +18,7 @@ module StaticAnalysis.PartialEvaluator where
                 | StringType (UnknownOrValue String)
                 | IntType (UnknownOrValue Integer)
                 | UIntType (UnknownOrValue Integer)
-                | BytesType (UnknownOrValue [Integer])
+                | BytesType (UnknownOrValue [Integer]) --list of Boolean more efficient
                 | ByteType (UnknownOrValue Integer)
                 | FixedType (UnknownOrValue (Integer, Integer))
                 | UfixedType (UnknownOrValue (Integer, Integer))
@@ -73,8 +73,11 @@ module StaticAnalysis.PartialEvaluator where
   
  type Storage = Map Symbol PartialExpression
  type Memory = Map Symbol PartialExpression
---  type Stack = Map Expression PartialExpression
- 
+
+--pop :: Stack -> (Stack, PartialExpression)
+--pop [] = ([], Error)
+--pop (a:as) = (as, a)
+
  ----------------------------------
  --Util Functions
  ----------------------------------
@@ -88,8 +91,8 @@ module StaticAnalysis.PartialEvaluator where
                                                       Just strVal -> strVal
                                                       Nothing -> Error
  
- push :: ProgramState -> Symbol -> PartialExpression -> ProgramState
- push (storage, memory, error) id exp = case Map.lookup id memory of
+ setValue :: ProgramState -> Symbol -> PartialExpression -> ProgramState
+ setValue (storage, memory, error) id exp = case Map.lookup id memory of
                                           Just mmrVal -> (storage, insert id exp memory, error)
                                           Nothing -> case Map.lookup id storage of
                                                        Just strVal -> (storage, insert id exp memory, error)
@@ -140,14 +143,16 @@ module StaticAnalysis.PartialEvaluator where
  --Transitioning
  ----------------------------------
 
- --step :: ProgramState -> Label -> ProgramState
+ step :: ProgramState -> Label -> ProgramState
  --for Label Statement
- --step programState (LabelE (Solidity.Unary string expression)) = 
- --step programState (LabelE (Solidity.Binary "=" (Identifier id) exp)) = push programState id (evaluate exp)
+ step programState (LabelE exp) = 
+ step programState (LabelE (Solidity.Binary "=" (Identifier id) exp)) = push programState id (evaluate exp)
   
  ----------------------------------
  --Evaluation Functions
  ----------------------------------
+
+
 
  evaluate :: ProgramState -> PartialExpression -> PartialExpression
  evaluate programState (Id id) = getValueOf programState id
@@ -162,8 +167,19 @@ module StaticAnalysis.PartialEvaluator where
  evaluate programState ((Binary ">=" exp1 exp2)) = moreThanOrEqual (evaluate programState exp1) (evaluate programState exp2)
  evaluate programState ((Binary "==" exp1 exp2)) = equal (evaluate programState exp1) (evaluate programState exp2)
  evaluate programState ((Binary "!=" exp1 exp2)) = notEqual (evaluate programState exp1) (evaluate programState exp2)
+ evaluate _ (Val Value) = (Val Value)
+ evaluate _ (Literal Value) = (Literal Value)
+ evaluate _ (FunctionCallNameValueList exp params) = (FunctionCallNameValueList exp params)
+ evaluate _ (FunctionCallExpressionList exp params) = (FunctionCallExpressionList exp params)
+ evaluate _ (TypeCasting typeName exp) = (TypeCasting typeName exp)
+ evaluate _ (MemberAccess exp symb) = (MemberAccess exp symb)--TODO
+ evaluate _ (Id symb) = (Id symb)--TODO
+ evaluate programState (Ternary "?" exp1 exp2 exp3) = case (evaluate programState exp1) of
+                                                        Val (BoolType (V True)) -> evaluate programState exp2
+                                                        Val (BoolType (V False)) -> evaluate programState exp3
+                                                        exp -> (Ternary "?" exp (evaluate programState exp2) (evaluate programState exp3))
  evaluate _ _ = Error
---TODO the rest                                            
+--TODO the rest          
  
 ----------------------------------
 --Basic Operations Util
