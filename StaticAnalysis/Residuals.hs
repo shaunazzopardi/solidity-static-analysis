@@ -1,9 +1,57 @@
-module StaticAnalysis.Residuals where
+module StaticAnalysis.Residuals (transitionDEAWithCFGLabel) where
 
 import qualified DEA.DEA as DEA
+import qualified EA.EA as EA
 import qualified CFG as CFG
 import Solidity.Solidity
 import Data.List
+
+
+
+
+toCombinedState :: DEA.State -> DEA.State -> DEA.State
+toCombinedState s1 s2 = DEA.State ("(" ++ (DEA.unState s1) ++ "," ++ (DEA.unState s2) ++ ")")
+
+syncComp :: DEA.DEA -> DEA.DEA -> DEA.DEA
+syncComp dea1 dea2 = reachibilityReduction DEA.DEA{
+                                                    DEA.daeName = (DEA.daeName dea1) ++ " || " ++ (DEA.daeName dea2),
+                                                    DEA.allStates = [toCombinedState s1 s2 | s1 <- DEA.allStates dea1, s2 <- DEA.allStates dea2],
+                                                    DEA.initialStates = [toCombinedState s1 s2 | s1 <- DEA.initialStates dea1, s2 <- DEA.initialStates dea2],
+                                                    DEA.transitions = deasSyncTransitons dea1 dea2,
+                                                    DEA.badStates = [toCombinedState s1 s2 | s1 <- DEA.badStates dea1, s2 <- DEA.badStates dea2],
+                                                    DEA.acceptanceStates = [toCombinedState s1 s2 | s1 <- DEA.acceptanceStates dea1, s2 <- DEA.acceptanceStates dea2]
+                                                  }
+
+combineConditions :: Maybe Expression -> Maybe Expression -> Maybe Expression
+combineConditions Nothing Nothing = Nothing
+combineConditions Nothing c = c
+combineConditions c Nothing = c
+combineConditions (Just e1) (Just e2) = Just (Binary "&&" e1 e2) 
+                                
+
+combineActions :: Maybe Statement -> Maybe Statement -> Maybe Statement
+combineActions Nothing Nothing = Nothing
+combineActions Nothing s = s
+combineActions s Nothing = s
+combineActions (Just s1) (Just s2) = Just (BlockStatement (Block (s1:(s2:[]))))
+
+
+deasSyncTransitons :: DEA.DEA -> DEA.DEA -> [DEA.Transition]
+deasSyncTransitons dea1 dea2 = [DEA.Transition (toCombinedState q1 q2) (toCombinedState q1' q2') (DEA.GCL e (combineConditions c1 c2) (combineActions a1 a2))
+                                                | (DEA.Transition q1 q1' (DEA.GCL e c1 a1)) <- DEA.transitions dea1,
+                                                  (DEA.Transition q2 q2' (DEA.GCL e c2 a2)) <- DEA.transitions dea2]
+                                       ++ [DEA.Transition (toCombinedState q1 q2) (toCombinedState q1' q2) (DEA.GCL e c1 a1)
+                                                | (DEA.Transition q1 q1' (DEA.GCL e c1 a1)) <- DEA.transitions dea1,
+                                                  q2 <- DEA.allStates dea2,
+                                                  (usesEvent (DEA.transitions dea2) q2 e) /= True]
+                                       ++ [DEA.Transition (toCombinedState q1 q2) (toCombinedState q1 q2') (DEA.GCL e c2 a2)
+                                                | (DEA.Transition q2 q2' (DEA.GCL e c2 a2)) <- DEA.transitions dea2,
+                                                  q1 <- DEA.allStates dea2,
+                                                  (usesEvent (DEA.transitions dea1) q1 e) /= True]
+
+usesEvent :: [DEA.Transition] -> DEA.State -> DEA.Event -> Bool
+usesEvent [] _ _ = False
+usesEvent ((DEA.Transition q _ (DEA.GCL e _ _)):rest) q' e' = (q == q' && e == e') || (usesEvent (rest) q e)
 
 reachibilityReduction :: DEA.DEA -> DEA.DEA
 reachibilityReduction dea = let badAfterStates = [state | state <- DEA.allStates dea, badAfter dea state]
@@ -42,54 +90,55 @@ statesAfter dea states = let afterOneStep = oneStep dea states
 oneStep :: DEA.DEA -> [DEA.State] -> [DEA.State]
 oneStep dea states = [dst | src <- states, DEA.Transition src dst _ <- DEA.transitions dea]
 
-quickCheck :: DEA.DEA -> CFG.FunctionCFG -> DEA.DEA
-quickCheck dea cfg = let reducedTransitions = [transition | transition <- DEA.transitions dea, [] /= getAllCFGTransitionsMatching (DEA.event (DEA.label transition)) (CFG.transitions cfg)]
+quickCheck :: DEA.DEA -> EA.EA -> DEA.DEA
+quickCheck dea cfg = let reducedTransitions = [transition | transition <- DEA.transitions dea, [] /= getAllEATransitionsMatching (DEA.event (DEA.label transition)) (EA.transitions cfg)]
                          naivelyReducedStates = (map (DEA.src) reducedTransitions) ++ (map (DEA.dst) reducedTransitions)
                          reducedInitialStates = [state | state <- naivelyReducedStates, state <- DEA.initialStates dea]
                          reducedBadStates = [state | state <- naivelyReducedStates, state <- DEA.badStates dea]
                          reducedAcceptanceStates = [state | state <- naivelyReducedStates, state <- DEA.acceptanceStates dea]
                          in DEA.DEA (DEA.daeName dea) naivelyReducedStates reducedInitialStates reducedTransitions reducedBadStates reducedAcceptanceStates 
-                      
-cfgSpecificSynchronousComposition :: DEA.DEA -> CFG.FunctionCFG -> CFG.FunctionCFG
-cfgSpecificSynchronousComposition dea cfg = let initialTaggedStates = [(CFG.initial cfg, DEA.initialStates dea)]
-                                                allTaggedStates = tagCFGStates dea cfg initialTaggedStates
-                                                allUsedCFGStates = map (fst) allTaggedStates
-                                                unusedCFGStates = CFG.states cfg \\ allUsedCFGStates
-                                                usedTransitionsHere = usedCFGTransitions dea cfg allTaggedStates
-                                                in if(notElem (CFG.initial cfg) unusedCFGStates)
-                                                    then CFG.FunctionCFG{
-                                                            CFG.signature = CFG.signature cfg,
-                                                            CFG.transitions = [],
-                                                            CFG.states = [CFG.BasicState "1"],
-                                                            CFG.initial = CFG.BasicState "1",
-                                                            CFG.end = [CFG.BasicState "1"]
-                                                    }
-                                                    else CFG.FunctionCFG{
-                                                            CFG.signature = CFG.signature cfg,
-                                                            CFG.transitions = usedTransitionsHere,
-                                                            CFG.states = allUsedCFGStates,
-                                                            CFG.initial = (CFG.initial cfg),
-                                                            CFG.end = (CFG.end cfg) \\ unusedCFGStates
-                                                         }
+                   
+
+--cfgSemiSynchronousComposition :: DEA.DEA -> EA -> EA
+--cfgSemiSynchronousComposition dea cfg = let initialTaggedStates = [(EA.initial cfg, DEA.initialStates dea)]
+--                                            allTaggedStates = tagCFGStates dea cfg initialTaggedStates
+--                                            allUsedCFGStates = map (fst) allTaggedStates
+--                                            unusedCFGStates = CFG.states cfg \\ allUsedCFGStates
+--                                            usedTransitionsHere = usedCFGTransitions dea cfg allTaggedStates
+--                                         in if(notElem (CFG.initial cfg) unusedCFGStates)
+--                                                    then CFG.FunctionCFG{
+--                                                            CFG.signature = CFG.signature cfg,
+--                                                            CFG.transitions = [],
+--                                                            CFG.states = [CFG.BasicState "1"],
+--                                                            CFG.initial = CFG.BasicState "1",
+--                                                            CFG.end = [CFG.BasicState "1"]
+--                                                    }
+--                                                    else CFG.FunctionCFG{
+--                                                            CFG.signature = CFG.signature cfg,
+--                                                            CFG.transitions = usedTransitionsHere,
+--                                                            CFG.states = allUsedCFGStates,
+--                                                            CFG.initial = (CFG.initial cfg),
+--                                                            CFG.end = (CFG.end cfg) \\ unusedCFGStates
+--                                                         }
                          
-                         
-deaSpecificSynchronousComposition :: DEA.DEA -> CFG.FunctionCFG -> DEA.DEA
-deaSpecificSynchronousComposition dea cfg = let initialTaggedStates = [(deaInitial, [CFG.initial cfg]) | deaInitial <- DEA.initialStates dea]
-                                                allTaggedStates = tagDEAStates dea cfg initialTaggedStates
-                                                allUsedDeaStates = map (fst) allTaggedStates
-                                                unusedDeaStates = DEA.allStates dea \\ allUsedDeaStates
-                                                usedTransitionsHere = usedDEATransitions dea cfg allTaggedStates
-                                                in DEA.DEA{
-                                                   DEA.daeName = DEA.daeName dea,
-                                                   DEA.allStates = allUsedDeaStates,
-                                                   DEA.initialStates = (DEA.initialStates dea) \\ unusedDeaStates,
-                                                   DEA.transitions = usedTransitionsHere,
-                                                   DEA.badStates = (DEA.badStates dea) \\ unusedDeaStates,
-                                                   DEA.acceptanceStates = (DEA.acceptanceStates dea) \\ unusedDeaStates
-                                                }
+                           
+deaSemiSynchronousComposition :: DEA.DEA -> EA.EA -> DEA.DEA
+deaSemiSynchronousComposition dea cfg = let initialTaggedStates = [(deaInitial, [EA.initial cfg]) | deaInitial <- DEA.initialStates dea]
+                                            allTaggedStates = tagDEAStates dea cfg initialTaggedStates
+                                            allUsedDeaStates = map (fst) allTaggedStates
+                                            unusedDeaStates = DEA.allStates dea \\ allUsedDeaStates
+                                            usedTransitionsHere = usedDEATransitions dea cfg allTaggedStates
+                                         in reachibilityReduction DEA.DEA{
+                                                                     DEA.daeName = DEA.daeName dea,
+                                                                     DEA.allStates = allUsedDeaStates,
+                                                                     DEA.initialStates = (DEA.initialStates dea) \\ unusedDeaStates,
+                                                                     DEA.transitions = usedTransitionsHere,
+                                                                     DEA.badStates = (DEA.badStates dea) \\ unusedDeaStates,
+                                                                     DEA.acceptanceStates = (DEA.acceptanceStates dea) \\ unusedDeaStates
+                                                                  }
 
 
-usedDEATransitions :: DEA.DEA -> CFG.FunctionCFG -> [(DEA.State, [CFG.State])] -> [DEA.Transition]
+usedDEATransitions :: DEA.DEA -> EA.EA -> [(DEA.State, [EA.State])] -> [DEA.Transition]
 usedDEATransitions dea cfg taggedStates = [DEA.Transition deaStateSrc deaStateDst deaLabel | DEA.Transition deaStateSrc deaStateDst deaLabel <- DEA.transitions dea,
                                                     (deaStateSrc, cfgStatesSrc) <- taggedStates,
                                                     (deaStateDst, cfgStatesDst) <- taggedStates,
@@ -98,12 +147,12 @@ usedDEATransitions dea cfg taggedStates = [DEA.Transition deaStateSrc deaStateDs
                                                     srcCfgState <- cfgStatesSrc,
                                                     dstCfgState <- cfgStatesDst,
                                                     --cfgTransition <- (transitions cfg),
-                                                    CFG.Transition srcCfgState dstCfgState ev <- (CFG.transitions cfg),
-                                                    propertyEventMatchesCFGEvent (DEA.event (deaLabel)) (ev)]
+                                                    EA.Transition srcCfgState dstCfgState ev <- (EA.transitions cfg),
+                                                    propertyEventMatchesEAEvent (DEA.event (deaLabel)) (ev)]
 
 
-usedCFGTransitions :: DEA.DEA -> CFG.FunctionCFG -> [(CFG.State, [DEA.State])] -> [CFG.Transition]
-usedCFGTransitions dea cfg taggedStates = [CFG.Transition cfgStateSrc cfgStateDst cfgLabel | CFG.Transition cfgStateSrc cfgStateDst cfgLabel <- CFG.transitions cfg,
+usedCFGTransitions :: DEA.DEA -> EA.EA -> [(EA.State, [DEA.State])] -> [EA.Transition]
+usedCFGTransitions dea cfg taggedStates = [EA.Transition cfgStateSrc cfgStateDst cfgLabel | EA.Transition cfgStateSrc cfgStateDst cfgLabel <- EA.transitions cfg,
                                                     (cfgStateSrc, deaStatesSrc) <- taggedStates,
                                                     (cfgStateDst, deaStatesDst) <- taggedStates,
                                                     --deaStateSrc = src deaTransition,
@@ -112,53 +161,65 @@ usedCFGTransitions dea cfg taggedStates = [CFG.Transition cfgStateSrc cfgStateDs
                                                     dstDEAState <- deaStatesDst,
                                                     --cfgTransition <- (transitions cfg),
                                                     DEA.Transition srcDEAState dstDEAState ev <- (DEA.transitions dea),
-                                                    propertyEventMatchesCFGEvent (DEA.event ev) (cfgLabel)]
+                                                    propertyEventMatchesEAEvent (DEA.event ev) (cfgLabel)]
 
                                      
-tagDEAStates :: DEA.DEA -> CFG.FunctionCFG -> [(DEA.State, [CFG.State])] -> [(DEA.State, [CFG.State])]
+tagDEAStates :: DEA.DEA -> EA.EA -> [(DEA.State, [EA.State])] -> [(DEA.State, [EA.State])]
 tagDEAStates dea cfg [] = []
-tagDEAStates dea cfg taggedDEAStates = let afterOneStepStates = [(deaState, [CFG.dst cfgTransition])
+tagDEAStates dea cfg taggedDEAStates = let afterOneStepStates = [(deaState, [EA.dst cfgTransition])
                                                                 | (deaState1, cfgStates1) <- taggedDEAStates,
                                                                     deaTransition <- transitionsFromDEAState dea deaState1,
                                                                     cfgState1 <- cfgStates1,
-                                                                    cfgTransition <- getAllCFGTransitionsMatching (DEA.event (DEA.label deaTransition)) (transitionsFromCFGState cfg cfgState1),--nextCFGTransitions, 
-                                                                    deaState <- transitionDEAWithCFGTransition dea deaState1 cfgTransition]
+                                                                    cfgTransition <- getAllEATransitionsMatching (DEA.event (DEA.label deaTransition)) (transitionsFromEAState cfg cfgState1),--nextCFGTransitions, 
+                                                                    deaState <- transitionDEAWithEATransition dea deaState1 cfgTransition]
                                         in let normalizedStates = unionOfTaggedDEAStates taggedDEAStates afterOneStepStates
                                                 in if(normalizedStates /= taggedDEAStates)
                                                     then tagDEAStates dea cfg normalizedStates
                                                     else normalizedStates
 
                                      
-tagCFGStates :: DEA.DEA -> CFG.FunctionCFG -> [(CFG.State, [DEA.State])] -> [(CFG.State, [DEA.State])]
-tagCFGStates dea cfg [] = []
-tagCFGStates dea cfg taggedCFGStates = let afterOneStepStates = [(cfgState, [DEA.dst deaTransition])
+tagEAStates :: DEA.DEA -> EA.EA -> [(EA.State, [DEA.State])] -> [(EA.State, [DEA.State])]
+tagEAStates dea cfg [] = []
+tagEAStates dea cfg taggedCFGStates = let afterOneStepStates = [(cfgState, [DEA.dst deaTransition])
                                                                 | (cfgState1, deaStates1) <- taggedCFGStates,
-                                                                    cfgTransition <- transitionsFromCFGState cfg cfgState1,
+                                                                    cfgTransition <- transitionsFromEAState cfg cfgState1,
                                                                     deaState1 <- deaStates1,
-                                                                    deaTransition <- getAllDEATransitionsMatching (CFG.event cfgTransition) (transitionsFromDEAState dea deaState1),--nextCFGTransitions, 
-                                                                    cfgState <- transitionCFGWithDEATransition cfg cfgState1 deaTransition]
-                                        in let normalizedStates = unionOfTaggedCFGStates taggedCFGStates afterOneStepStates
+                                                                    deaTransition <- getAllDEATransitionsMatching (EA.event cfgTransition) (transitionsFromDEAState dea deaState1),--nextCFGTransitions, 
+                                                                    cfgState <- transitionEAWithDEATransition cfg cfgState1 deaTransition]
+                                        in let normalizedStates = unionOfTaggedEAStates taggedCFGStates afterOneStepStates
                                                 in if(normalizedStates /= taggedCFGStates)
-                                                    then tagCFGStates dea cfg normalizedStates
+                                                    then tagEAStates dea cfg normalizedStates
                                                     else normalizedStates
 
-transitionDEAWithCFGTransition :: DEA.DEA -> DEA.State -> CFG.Transition -> [DEA.State]
-transitionDEAWithCFGTransition dea deaState cfgTransition = let transitionsAvailable = transitionsFromDEAState dea deaState  
+transitionDEAWithEATransition :: DEA.DEA -> DEA.State -> EA.Transition -> [DEA.State]
+transitionDEAWithEATransition dea deaState cfgTransition = let  transitionsAvailable = transitionsFromDEAState dea deaState  
                                                                 matchingTransitions = [deaTransition | deaTransition <- transitionsAvailable, 
-                                                                                                        propertyEventMatchesCFGEvent (DEA.event (DEA.label deaTransition)) (CFG.event cfgTransition)]
+                                                                                                        propertyEventMatchesEAEvent (DEA.event (DEA.label deaTransition)) (EA.event cfgTransition)]
                                                                 nextStates = [DEA.dst deaTransition | deaTransition <- matchingTransitions] ++ [deaState |          
                                                                                                     deaTransition <- matchingTransitions, 
                                                                                                     Nothing /= (DEA.guard (DEA.label deaTransition))]
                                                                 in if(matchingTransitions == [])
                                                                     then [deaState]
                                                                     else nextStates
+
+transitionDEAWithCFGLabel :: DEA.DEA -> DEA.State -> CFG.Label -> [DEA.State]
+transitionDEAWithCFGLabel  dea deaState cfgLabel = let transitionsAvailable = transitionsFromDEAState dea deaState  
+                                                       eaEvents = EA.cfgEventToDea cfgLabel [DEA.event (DEA.label trans) | trans <- DEA.transitions dea]
+                                                       deaEvents = [ev | EA.DEAEvent ev <- eaEvents]
+                                                       matchingTransitions = [deaTransition | deaTransition <- transitionsAvailable, elem (DEA.event (DEA.label deaTransition))  deaEvents]
+                                                       nextStates = [DEA.dst deaTransition | deaTransition <- matchingTransitions] 
+                                                                                       ++ [deaState |  deaTransition <- matchingTransitions, 
+                                                                                                    Nothing /= (DEA.guard (DEA.label deaTransition))]
+                                                                in if(matchingTransitions == [])
+                                                                    then [deaState]
+                                                                    else nextStates
                                                                     
 
-transitionCFGWithDEATransition :: CFG.FunctionCFG -> CFG.State -> DEA.Transition -> [CFG.State]
-transitionCFGWithDEATransition cfg cfgState deaTransition = let transitionsAvailable = transitionsFromCFGState cfg cfgState  
+transitionEAWithDEATransition :: EA.EA -> EA.State -> DEA.Transition -> [EA.State]
+transitionEAWithDEATransition cfg cfgState deaTransition = let  transitionsAvailable = transitionsFromEAState cfg cfgState  
                                                                 matchingTransitions = [cfgTransition | cfgTransition <- transitionsAvailable, 
-                                                                                                        propertyEventMatchesCFGEvent (DEA.event (DEA.label deaTransition)) (CFG.event cfgTransition)]
-                                                                nextStates = [CFG.dst cfgTransition | cfgTransition <- matchingTransitions] 
+                                                                                                        propertyEventMatchesEAEvent (DEA.event (DEA.label deaTransition)) (EA.event cfgTransition)]
+                                                                nextStates = [EA.dst cfgTransition | cfgTransition <- matchingTransitions] 
                                                                             ++ [cfgState | cfgTransition <- matchingTransitions, 
                                                                                            Nothing /= (DEA.guard (DEA.label deaTransition))]
                                                                 in if(matchingTransitions == [])
@@ -166,13 +227,13 @@ transitionCFGWithDEATransition cfg cfgState deaTransition = let transitionsAvail
                                                                     else nextStates
                                                                     
                                         
-unionOfTaggedDEAStates :: [(DEA.State, [CFG.State])] -> [(DEA.State, [CFG.State])] -> [(DEA.State, [CFG.State])]
+unionOfTaggedDEAStates :: [(DEA.State, [EA.State])] -> [(DEA.State, [EA.State])] -> [(DEA.State, [EA.State])]
 unionOfTaggedDEAStates states1 states2 = [(deaState, cfgStates1 ++ (cfgStates2 \\ cfgStates1)) | (deaState, cfgStates1) <- states1, (deaState, cfgStates2) <- states2] 
                                       ++ [(deaState, cfgStates) | (deaState, cfgStates) <- states1,  notElem deaState (map (fst) states2)]
                                       ++ [(deaState, cfgStates) | (deaState, cfgStates) <- states2,  notElem deaState (map (fst) states1)]
 
-unionOfTaggedCFGStates :: [(CFG.State, [DEA.State])] -> [(CFG.State, [DEA.State])] -> [(CFG.State, [DEA.State])]
-unionOfTaggedCFGStates states1 states2 = [(cfgState, deaStates1 ++ (deaStates2 \\ deaStates1)) | (cfgState, deaStates1) <- states1, (cfgState, deaStates2) <- states2] 
+unionOfTaggedEAStates :: [(EA.State, [DEA.State])] -> [(EA.State, [DEA.State])] -> [(EA.State, [DEA.State])]
+unionOfTaggedEAStates states1 states2 = [(cfgState, deaStates1 ++ (deaStates2 \\ deaStates1)) | (cfgState, deaStates1) <- states1, (cfgState, deaStates2) <- states2] 
                                       ++ [(cfgState, deaStates) | (cfgState, deaStates) <- states1,  notElem cfgState (map (fst) states2)]
                                       ++ [(cfgState, deaStates) | (cfgState, deaStates) <- states2,  notElem cfgState (map (fst) states1)]
                                       
@@ -183,61 +244,29 @@ unionOfTaggedCFGStates states1 states2 = [(cfgState, deaStates1 ++ (deaStates2 \
 --transitionTogether dea cfg deaState cfgState = let deaTransitions = transitionsFromDEAState dea deaState
 --                                                   cfgTransitions = transitionFromCFGState cfg cfgState
             
-getAllCFGTransitionsMatching :: DEA.Event -> [CFG.Transition] -> [CFG.Transition]
-getAllCFGTransitionsMatching deaEvent [] = []
-getAllCFGTransitionsMatching deaEvent (t:ts) = if(propertyEventMatchesCFGEvent deaEvent (CFG.event t))
-                                                then [t] ++ getAllCFGTransitionsMatching deaEvent ts
-                                                else getAllCFGTransitionsMatching deaEvent ts
+getAllEATransitionsMatching :: DEA.Event -> [EA.Transition] -> [EA.Transition]
+getAllEATransitionsMatching deaEvent [] = []
+getAllEATransitionsMatching deaEvent (t:ts) = let rest = getAllEATransitionsMatching deaEvent ts
+                                                in case EA.event t of
+                                                     EA.Tau -> rest
+                                                     EA.DEAEvent deaEvent2 -> if deaEvent == deaEvent2
+                                                                              then  [t] ++ rest
+                                                                              else rest
             
-getAllDEATransitionsMatching :: CFG.Label -> [DEA.Transition] -> [DEA.Transition]
-getAllDEATransitionsMatching cfgEvent [] = []
-getAllDEATransitionsMatching cfgEvent (t:ts) = if(propertyEventMatchesCFGEvent (DEA.event (DEA.label t)) cfgEvent)
-                                                then [t] ++ getAllDEATransitionsMatching cfgEvent ts
-                                                else getAllDEATransitionsMatching cfgEvent ts
+getAllDEATransitionsMatching :: EA.Event -> [DEA.Transition] -> [DEA.Transition]
+getAllDEATransitionsMatching eaEvent [] = []
+getAllDEATransitionsMatching eaEvent (t:ts) = if propertyEventMatchesEAEvent (DEA.event (DEA.label t)) eaEvent
+                                                            then [t] ++ getAllDEATransitionsMatching eaEvent ts
+                                                            else getAllDEATransitionsMatching eaEvent ts
 
 transitionsFromDEAState :: DEA.DEA -> DEA.State -> [DEA.Transition]
 transitionsFromDEAState dea deaState = [transition | transition <- DEA.transitions dea, deaState == DEA.src transition]
 
-transitionsFromCFGState :: CFG.FunctionCFG -> CFG.State -> [CFG.Transition]
-transitionsFromCFGState cfg cfgState = [transition | transition <- CFG.transitions cfg, cfgState == CFG.src transition]
+transitionsFromEAState :: EA.EA -> EA.State -> [EA.Transition]
+transitionsFromEAState ea eaState = [transition | transition <- EA.transitions ea, eaState == EA.src transition]
 
---DEA
---data Event
---  = DEA.UponEntry FunctionCall
---  | DEA.UponExit FunctionCall
---  | DEA.VariableAssignment VariableName (Maybe Expression)
-
---CFG
---data Label = Label Statement | CFG.LabelE Expression | ConditionHolds Expression | ConditionDoesNotHold Expression | Tau | ReturnLabel Expression | ReturnVoid deriving (Eq, Ord, Show)
-
-
-propertyEventMatchesCFGEvent :: DEA.Event -> CFG.Label -> Bool
-propertyEventMatchesCFGEvent  (DEA.UponEntry (DEA.FunctionCall name params)) (CFG.Entering (CFG.FunctionCall name2 _)) = if(name == name2)
-                                                                                    then True
-                                                                                    else False
-propertyEventMatchesCFGEvent  (DEA.UponExit (DEA.FunctionCall name params)) (CFG.Exiting (CFG.FunctionCall name2 _)) = if(name == name2)
-                                                                                    then True
-                                                                                    else False
-propertyEventMatchesCFGEvent  (DEA.VariableAssignment identifier Nothing) (CFG.LabelE expr) = changesVariable identifier expr 
-propertyEventMatchesCFGEvent  (DEA.VariableAssignment identifier (Just expression)) (CFG.LabelE expr) = changesVariable identifier expr 
-propertyEventMatchesCFGEvent _ _ = False
-
-
-changesVariable :: Identifier -> Expression -> Bool
-changesVariable (Identifier varName) (Unary "++" (Literal (PrimaryExpressionIdentifier (Identifier varName2)))) = if(varName == varName2) 
-                                                                                                                  then True
-                                                                                                                  else False
-changesVariable (Identifier varName) (Unary "--" (Literal (PrimaryExpressionIdentifier (Identifier varName2)))) = if(varName == varName2) 
-                                                                                                                  then True
-                                                                                                                  else False
-changesVariable (Identifier varName) (Unary "delete" (Literal (PrimaryExpressionIdentifier (Identifier varName2)))) = if(varName == varName2) 
-                                                                                                                        then True
-                                                                                                                        else False
-changesVariable (Identifier varName) (Binary op (Literal (PrimaryExpressionIdentifier (Identifier varName2))) _) = 
-                            if(op == "=" || op == "+=" || op == "|=" || op == "^=" || op == "-=" || op == "*=" || op == "%/" || op == "<<=" || op == ">>=" || op == "/=" ) 
-                                then if(varName == varName2) 
-                                       then True
-                                       else False 
-                                else False
-
-changesVariable (Identifier varName) _ = False
+propertyEventMatchesEAEvent :: DEA.Event -> EA.Event -> Bool
+propertyEventMatchesEAEvent deaEvent1 (EA.DEAEvent deaEvent2) = if deaEvent1 == deaEvent2
+                                                                    then True
+                                                                    else False
+propertyEventMatchesEAEvent _ _ = False                                                                 

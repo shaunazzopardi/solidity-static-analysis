@@ -497,7 +497,7 @@ type Join a = [a] -> a
 type DEAState = ([DEA.State], DEA.DEA)
 
 deaAF :: AbstractionFunction DEAState
-deaAF (t, (f, sc, _)) (states, dea) = let nextStates = [next | s <- states, next <- StaticAnalysis.Residuals.transitionDEAWithCFGTransition dea s t]
+deaAF (t, (f, sc, _)) (states, dea) = let nextStates = [next | s <- states, next <- StaticAnalysis.Residuals.transitionDEAWithCFGLabel dea s (event t)]
                                        in (nextStates, dea)
 
 
