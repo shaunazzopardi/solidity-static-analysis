@@ -24,7 +24,7 @@ Compilation: Run the following command in the src folder:
 
 For correct results always make sure that the Solidity code compiles with a Solidity compiler.
 
-To use the tool pass the location of a solidity file and the preferred location of the output to the executable, e.g. execute:
+To use the tool pass the location of the smart contract solidity file, the DEA property file, and the preferred location of the output to the executable, e.g. execute:
 
 > "./solidity-static-analysis" &lt;solidity-code.sol&gt; &lt;property.dea&gt; &lt;residual.dea&gt;
 
