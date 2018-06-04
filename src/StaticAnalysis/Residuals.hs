@@ -1,4 +1,4 @@
-module StaticAnalysis.Residuals (transitionDEAWithCFGLabel) where
+module StaticAnalysis.Residuals (transitionDEAWithCFGLabel, performResidualAnalysisOnContractSpecification) where
 
 import qualified DEA.DEA as DEA
 import qualified EA.EA as EA
@@ -7,7 +7,22 @@ import Solidity.Solidity
 import Data.List
 
 
+performResidualAnalysisOnContractSpecification :: DEA.ContractSpecification -> EA.EA -> DEA.ContractSpecification
+performResidualAnalysisOnContractSpecification contract ea = let residuals = map (\x -> performResidualAnalysisOnDEA x ea) (DEA.daes contract) 
+                                                               in DEA.ContractSpecification{
+                                                                  DEA.contractName = DEA.contractName contract,
+                                                                  DEA.declarations = DEA.declarations contract,
+                                                                  DEA.initialisation = DEA.initialisation contract,
+                                                                  DEA.satisfaction = DEA.satisfaction contract,
+                                                                  DEA.reparation = DEA.reparation contract,
+                                                                  DEA.daes = residuals
+                                                             }
 
+
+performResidualAnalysisOnDEA :: DEA.DEA -> EA.EA -> DEA.DEA
+performResidualAnalysisOnDEA dea ea = let dea1 = reachibilityReduction $ quickCheck dea ea
+                                          dea2 = reachibilityReduction $ deaSemiSynchronousComposition dea ea
+                                        in dea2
 
 toCombinedState :: DEA.State -> DEA.State -> DEA.State
 toCombinedState s1 s2 = DEA.State ("(" ++ (DEA.unState s1) ++ "," ++ (DEA.unState s2) ++ ")")

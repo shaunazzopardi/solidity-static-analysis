@@ -1,4 +1,4 @@
-module EA.EA (cfgEventToDea, fromFunctionCFGs, Event(..), Transition(..), EA(..), State(..)) where
+module EA.EA (cfgEventToDea, fromFunctionCFGs, fromCFG, Event(..), Transition(..), EA(..), State(..)) where
 
 import qualified DEA.DEA as DEA
 import qualified CFG.CFG as CFG
@@ -52,6 +52,8 @@ cfgEventToDea (CFG.LabelE expr) ((DEA.VariableAssignment varName maybeExpr):rest
                                                                                                 in if changesVariable varName expr
                                                                                                     then [DEAEvent (DEA.VariableAssignment varName maybeExpr)] ++ otherMatches
                                                                                                     else otherMatches
+
+cfgEventToDea _ _ = []
 
 changesVariable :: Solidity.Identifier -> Solidity.Expression -> Bool
 changesVariable (Solidity.Identifier varName) (Solidity.Unary "++" (Solidity.Literal (Solidity.PrimaryExpressionIdentifier (Solidity.Identifier varName2)))) = if(varName == varName2) 
@@ -118,3 +120,6 @@ fromFunctionCFGs cfgs events =  let initialState = State "<-initial->"
                                             final = [finalState],
                                             transitions = allTransitions
                                         }
+
+fromCFG :: CFG.CFG -> DEA.ContractSpecification -> EA
+fromCFG (CFG.CFG cfgs) contract = fromFunctionCFGs cfgs (foldr (++) [] $ map (DEA.getEventsFromDEA) (DEA.daes contract))

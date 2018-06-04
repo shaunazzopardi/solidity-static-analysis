@@ -23,6 +23,11 @@ import Text.Parsec hiding (try)
 import Text.Parsec.String
 import Solidity
 import CFG
+import StaticAnalysis
+import StaticAnalysis.Residuals
+import EA.EA
+import Parseable
+import DEA
 
 type Filename = String
 
@@ -40,14 +45,17 @@ parseIO filename = either (fail . (parseError ++) . show) return . parse parser 
 main =
   do
     arguments <- getArgs
-    ifNot (length arguments == 2)
-      ("Usage: <input solidity file> <output solidity file>")
-    let [inFile, outFile] = arguments
-    inputText <- readFile inFile
-      `failWith` ("Cannot read Solidity file <"++inFile++">")
-    solidityCode <- parseIO inFile inputText
-    let outCode = display (contractCFG solidityCode)
-    writeFile outFile (outCode)
-      `failWith` ("Cannot write to Solidity file <"++outFile++">")
-    putStrLn ("Created contract-flow graph file <"++outFile++">")
+    ifNot (length arguments == 3)
+      ("Usage: <input solidity file> <input dea file> <output dea file>")
+    let [inSCFile, inDEAFile, outFile] = arguments
+    inputText <- readFile inSCFile
+      `failWith` ("Cannot read Solidity file <"++inSCFile++">")
+    solidityCode <- parseIO inSCFile inputText
+    inputDEA <- readFile inDEAFile
+      `failWith` ("Cannot read DEA file <"++inDEAFile++">")
+    dea <- parseIO inDEAFile inputDEA
+    let outCode = (performResidualAnalysisOnContractSpecification dea (fromCFG (contractCFG solidityCode) dea))
+    writeFile outFile (display outCode)
+      `failWith` ("Cannot write to DEA file <"++outFile++">")
+    putStrLn ("Created residual DEA file <"++outFile++">")
   `catch` (putStrLn . ioeGetErrorString)
