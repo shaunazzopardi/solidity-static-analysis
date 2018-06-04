@@ -8,6 +8,9 @@ Using a control-flow graph representation of a Solidity smart contract we attemp
 
 The previous static analysis may fail, therefore we reduce from a DEA the parts that have been proven safe leaving a residual that we still have to prove against the smart contract. The smart contract can then be monitored with this residual DEA, e.g. by [instrumenting the smart contract with the DEA logic](https://github.com/gordonpace/contractlarva), or as a [separate smart contract](https://github.com/shaunazzopardi/ethereuem-runtime-verification/).
 
+The correctness of this residual analysis is presented in the proceedings of [PrePost 2017](http://staff.um.edu.mt/afra1/prepost17/), in the [EPCTS series](http://eptcs.web.cse.unsw.edu.au/content.cgi?PrePost17), and available on [arXiv](https://arxiv.org/abs/1708.07230).
+
+
 Limitations:
 -----------------
 1. Currently only limited to DEA with only bad states.
