@@ -3,6 +3,7 @@ module EA.EA (cfgEventToDea, fromFunctionCFGs, fromCFG, Event(..), Transition(..
 import qualified DEA.DEA as DEA
 import qualified CFG.CFG as CFG
 import qualified Solidity.Solidity as Solidity
+import Data.List 
 
 data EA = EA{
             states :: [State],
@@ -104,22 +105,34 @@ fromFunctionCFG functionCFG events = EA{
                                     }
 
 
-
+--TODO HANDLE THROW STATES
 fromFunctionCFGs :: [CFG.FunctionCFG] -> [DEA.Event] -> EA
 fromFunctionCFGs cfgs events =  let initialState = State "<-initial->"
                                     finalState = State "<-final->"
                                     eas = map (\x -> fromFunctionCFG x events) cfgs 
-                                    easInitialStates = map (initial) eas
-                                    initialTransitions = [Transition initialState eaInitialState Tau | eaInitialState <- easInitialStates]
-                                    easFinalStates = foldr (++) [] (map (final) eas)
-                                    finalTransitions = [Transition easFinalState finalState Tau | easFinalState <- easFinalStates]
+                                    initialTransitions = [Transition initialState (initial ea) (DEAEvent ((DEA.UponEntry (signatureToCall (CFG.signature cfg))))) | cfg <- cfgs, ea <- [fromFunctionCFG cfg events]]
+                                    finalTransitions = [Transition (State label) finalState (DEAEvent ((DEA.UponExit (signatureToCall (CFG.signature cfg))))) | cfg <- cfgs, ea <- [fromFunctionCFG cfg events], State label <- final ea, not (isInfixOf "throw-" label), not (isInfixOf "revert-" label)]
                                     allTransitions = (foldr (++) [] (map (transitions) eas)) ++ initialTransitions ++ finalTransitions
                                   in EA{
                                             states = foldr (++) [] (map states eas),
                                             initial = initialState,
                                             final = [finalState],
-                                            transitions = allTransitions
+                                            transitions = allTransitions ++ [Transition finalState initialState Tau]
                                         }
 
 fromCFG :: CFG.CFG -> DEA.ContractSpecification -> EA
 fromCFG (CFG.CFG cfgs) contract = fromFunctionCFGs cfgs (foldr (++) [] $ map (DEA.getEventsFromDEA) (DEA.daes contract))
+
+signatureToCall :: CFG.FunctionSignature -> DEA.FunctionCall
+signatureToCall (CFG.FunctionSignature name _ (Solidity.ParameterList []) _) = DEA.FunctionCall name Nothing
+signatureToCall (CFG.FunctionSignature name _ params _) = DEA.FunctionCall name (Just $ typedParamsToUntyped params)
+
+typedParamsToUntyped :: Solidity.ParameterList -> Solidity.UntypedParameterList
+typedParamsToUntyped paramList = typedParamsToUntypedHelper paramList 0
+
+typedParamsToUntypedHelper :: Solidity.ParameterList -> Int -> Solidity.UntypedParameterList
+typedParamsToUntypedHelper (Solidity.ParameterList ((Solidity.Parameter typ (Just name)):ps)) no = let rest = Solidity.fromUntypedParameterList $ typedParamsToUntypedHelper (Solidity.ParameterList ps) no
+                                                                                                  in Solidity.UntypedParameterList ([name] ++ rest)
+typedParamsToUntypedHelper (Solidity.ParameterList ((Solidity.Parameter typ Nothing):ps)) no = let rest = Solidity.fromUntypedParameterList $ typedParamsToUntypedHelper (Solidity.ParameterList ps) (no + 1)
+                                                                                                  in Solidity.UntypedParameterList ([Solidity.Identifier ("param" ++ (show no))] ++ rest)
+typedParamsToUntypedHelper (Solidity.ParameterList []) _ = Solidity.UntypedParameterList []
