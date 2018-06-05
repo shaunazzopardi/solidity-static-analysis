@@ -1,8 +1,7 @@
 module CFG.CFG (State(..), Label(..), Transition(..), FunctionCFG(..), CFG(..), FunctionCall(..), contractCFG, contractCFGFromContractDefinition, FunctionVisibility(..), FunctionSignature(..), prependStateLabelsWith) where
 
-import Solidity.Solidity;
+import Solidity.Solidity
 import Data.List
---import DEA.DEA;
 
 type SCAddress = String
 
@@ -74,6 +73,7 @@ data CFG = CFG [FunctionCFG]
 
 --------------------------------------------------------------
 --------------------------------------------------------------
+
 
 --Replace state with given controlflow
 replaceStateWith :: FunctionCFG -> State -> (State, [Transition], [State]) -> FunctionCFG
@@ -209,7 +209,7 @@ contractCFG (SolidityCode (SourceUnit sourceUnits)) =
 
 contractCFGFromSource :: SourceUnit1 -> [FunctionCFG]
 contractCFGFromSource (SourceUnit1_ContractDefinition contractDefinition) = contractCFGFromContractDefinition contractDefinition
-
+contractCFGFromSource _ = []
 --------------------------------------------------------------
 --------------------------------------------------------------
 
@@ -236,6 +236,7 @@ functionDefinitionTagsToFunctionVisibility (FunctionDefinitionTagPublic:_) = Pub
 functionDefinitionTagsToFunctionVisibility (FunctionDefinitionTagPrivate:_) = Private
 functionDefinitionTagsToFunctionVisibility (FunctionDefinitionTagStateMutability Internal:_) = FInternal
 functionDefinitionTagsToFunctionVisibility (FunctionDefinitionTagStateMutability External:_) = FExternal
+functionDefinitionTagsToFunctionVisibility (_:rest) = functionDefinitionTagsToFunctionVisibility rest
 
 --------------------------------------------------------------
 --------------------------------------------------------------
@@ -379,7 +380,7 @@ prependStateLabelsWith prefix functionCFG = FunctionCFG{
 prependStateLabelWith :: String -> State -> State
 prependStateLabelWith prefix (BasicState label) = BasicState (prefix ++ label)
 prependStateLabelWith prefix (FunctionCallState label functionName) = FunctionCallState (prefix ++ label) functionName
-
+prependStateLabelWith _ s = s
 --------------------------------------------------------------
 --------------------------------------------------------------
 noStateChange (FunctionDefinitionTagStateMutability Pure) = True;
