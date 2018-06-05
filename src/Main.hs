@@ -54,8 +54,8 @@ main =
     inputDEA <- readFile inDEAFile
       `failWith` ("Cannot read DEA file <"++inDEAFile++">")
     dea <- parseIO inDEAFile inputDEA
-    let outCode = (performResidualAnalysisOnContractSpecification dea (fromCFG (contractCFG solidityCode) dea))
-    writeFile outFile (display outCode)
+    let outDEA = (performResidualAnalysisOnContractSpecification dea (fromCFG (contractCFG solidityCode) dea))
+    writeFile outFile (display outDEA)
       `failWith` ("Cannot write to DEA file <"++outFile++">")
     putStrLn ("Created residual DEA file <"++outFile++">")
   `catch` (putStrLn . ioeGetErrorString)
