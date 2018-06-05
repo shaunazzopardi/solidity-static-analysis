@@ -1,4 +1,4 @@
-module StaticAnalysis.Residuals (transitionDEAWithCFGLabel, performResidualAnalysisOnContractSpecification) where
+module StaticAnalysis.Residuals (transitionDEAWithCFGLabel, performResidualAnalysisOnContractSpecification, deaSyncComp) where
 
 import qualified DEA.DEA as DEA
 import qualified EA.EA as EA
@@ -21,14 +21,14 @@ performResidualAnalysisOnContractSpecification contract ea = let residuals = map
 
 performResidualAnalysisOnDEA :: DEA.DEA -> EA.EA -> DEA.DEA
 performResidualAnalysisOnDEA dea ea = let dea1 = reachibilityReduction $ quickCheck dea ea
-                                          dea2 = reachibilityReduction $ deaSemiSynchronousComposition dea ea
-                                        in dea2
+                                          dea2 = reachibilityReduction $ deaSemiSynchronousComposition dea1 ea
+                                        in dea1
 
 toCombinedState :: DEA.State -> DEA.State -> DEA.State
 toCombinedState s1 s2 = DEA.State ("(" ++ (DEA.unState s1) ++ "," ++ (DEA.unState s2) ++ ")")
 
-syncComp :: DEA.DEA -> DEA.DEA -> DEA.DEA
-syncComp dea1 dea2 = reachibilityReduction DEA.DEA{
+deaSyncComp :: DEA.DEA -> DEA.DEA -> DEA.DEA
+deaSyncComp dea1 dea2 =  DEA.DEA{
                                                     DEA.daeName = (DEA.daeName dea1) ++ " || " ++ (DEA.daeName dea2),
                                                     DEA.allStates = [toCombinedState s1 s2 | s1 <- DEA.allStates dea1, s2 <- DEA.allStates dea2],
                                                     DEA.initialStates = [toCombinedState s1 s2 | s1 <- DEA.initialStates dea1, s2 <- DEA.initialStates dea2],
@@ -69,8 +69,9 @@ usesEvent [] _ _ = False
 usesEvent ((DEA.Transition q _ (DEA.GCL e _ _)):rest) q' e' = (q == q' && e == e') || (usesEvent (rest) q e)
 
 reachibilityReduction :: DEA.DEA -> DEA.DEA
-reachibilityReduction dea = let badAfterStates = [state | state <- DEA.allStates dea, badAfter dea state]
-                                goodEntryPointStates = [state | state <- DEA.allStates dea, goodEntryPoint dea state]
+reachibilityReduction dea = let statesReachableFromInitialState = statesAfter dea (DEA.initialStates dea)
+                                badAfterStates = [state | state <- statesReachableFromInitialState, badAfter dea state]
+                                goodEntryPointStates = [state | state <- statesReachableFromInitialState, goodEntryPoint dea state]
                                 usefulStates = badAfterStates ++ goodEntryPointStates
                                 uselessStates = DEA.allStates dea \\ usefulStates
                                 usefulTransitions = [transition | transition <- DEA.transitions dea, elem (DEA.src transition) usefulStates, elem (DEA.dst transition) usefulStates]
@@ -97,20 +98,20 @@ pathBetween dea q q' = elem q (statesAfter dea [q])
 
 statesAfter :: DEA.DEA -> [DEA.State] -> [DEA.State]
 statesAfter dea [] = []
-statesAfter dea states = let afterOneStep = oneStep dea states
-                             in if(afterOneStep \\ states /= [])
+statesAfter dea states = let afterOneStep = nub $ ((oneStep dea states) ++ states)
+                             in if(afterOneStep \\ (nub $ states) /= [])
                                     then statesAfter dea afterOneStep
-                                    else states
+                                    else afterOneStep
 
 oneStep :: DEA.DEA -> [DEA.State] -> [DEA.State]
 oneStep dea states = [dst | src <- states, DEA.Transition src dst _ <- DEA.transitions dea]
 
 quickCheck :: DEA.DEA -> EA.EA -> DEA.DEA
 quickCheck dea cfg = let reducedTransitions = [transition | transition <- DEA.transitions dea, [] /= getAllEATransitionsMatching (DEA.event (DEA.label transition)) (EA.transitions cfg)]
-                         naivelyReducedStates = (map (DEA.src) reducedTransitions) ++ (map (DEA.dst) reducedTransitions)
-                         reducedInitialStates = [state | state <- naivelyReducedStates, state <- DEA.initialStates dea]
-                         reducedBadStates = [state | state <- naivelyReducedStates, state <- DEA.badStates dea]
-                         reducedAcceptanceStates = [state | state <- naivelyReducedStates, state <- DEA.acceptanceStates dea]
+                         naivelyReducedStates = nub $ (map (DEA.src) reducedTransitions) ++ (map (DEA.dst) reducedTransitions)
+                         reducedInitialStates = nub $ [state | state <- naivelyReducedStates, state <- DEA.initialStates dea]
+                         reducedBadStates = nub $ [state | state <- naivelyReducedStates, state <- DEA.badStates dea]
+                         reducedAcceptanceStates = nub $ [state | state <- naivelyReducedStates, state <- DEA.acceptanceStates dea]
                          in DEA.DEA (DEA.daeName dea) naivelyReducedStates reducedInitialStates reducedTransitions reducedBadStates reducedAcceptanceStates 
                    
 
@@ -143,7 +144,7 @@ deaSemiSynchronousComposition dea cfg = let initialTaggedStates = [(deaInitial, 
                                             allUsedDeaStates = map (fst) allTaggedStates
                                             unusedDeaStates = DEA.allStates dea \\ allUsedDeaStates
                                             usedTransitionsHere = usedDEATransitions dea cfg allTaggedStates
-                                         in reachibilityReduction DEA.DEA{
+                                         in DEA.DEA{
                                                                      DEA.daeName = DEA.daeName dea,
                                                                      DEA.allStates = allUsedDeaStates,
                                                                      DEA.initialStates = (DEA.initialStates dea) \\ unusedDeaStates,
@@ -185,11 +186,16 @@ tagDEAStates dea cfg taggedDEAStates = let afterOneStepStates = [(deaState, [EA.
                                                                 | (deaState1, cfgStates1) <- taggedDEAStates,
                                                                     deaTransition <- transitionsFromDEAState dea deaState1,
                                                                     cfgState1 <- cfgStates1,
-                                                                    cfgTransition <- getAllEATransitionsMatching (DEA.event (DEA.label deaTransition)) (transitionsFromEAState cfg cfgState1),--nextCFGTransitions, 
+                                                                    cfgTransition <- transitionsFromEAState cfg cfgState1,-- getAllEATransitionsMatching (DEA.event (DEA.label deaTransition)) (transitionsFromEAState cfg cfgState1),--nextCFGTransitions, 
                                                                     deaState <- transitionDEAWithEATransition dea deaState1 cfgTransition]
-                                        in let normalizedStates = unionOfTaggedDEAStates taggedDEAStates afterOneStepStates
-                                                in if(normalizedStates /= taggedDEAStates)
-                                                    then tagDEAStates dea cfg normalizedStates
+                                                                  ++ [(deaState, [EA.dst cfgTransition])
+                                                                      | (deaState, cfgStates1) <- taggedDEAStates,
+                                                                          cfgState1 <- cfgStates1,
+                                                                          cfgTransition <- transitionsFromEAState cfg cfgState1,-- getAllEATransitionsMatching (DEA.event (DEA.label deaTransition)) (transitionsFromEAState cfg cfgState1),--nextCFGTransitions, 
+                                                                          EA.event cfgTransition == EA.Tau]
+                                        in let normalizedStates = nub $ unionOfTaggedDEAStates taggedDEAStates afterOneStepStates
+                                                in if(normalizedStates \\ (nub taggedDEAStates) /= [])
+                                                   then tagDEAStates dea cfg normalizedStates
                                                     else normalizedStates
 
                                      
@@ -202,7 +208,7 @@ tagEAStates dea cfg taggedCFGStates = let afterOneStepStates = [(cfgState, [DEA.
                                                                     deaTransition <- getAllDEATransitionsMatching (EA.event cfgTransition) (transitionsFromDEAState dea deaState1),--nextCFGTransitions, 
                                                                     cfgState <- transitionEAWithDEATransition cfg cfgState1 deaTransition]
                                         in let normalizedStates = unionOfTaggedEAStates taggedCFGStates afterOneStepStates
-                                                in if(normalizedStates /= taggedCFGStates)
+                                                in if(normalizedStates \\ (nub taggedCFGStates) /= [])
                                                     then tagEAStates dea cfg normalizedStates
                                                     else normalizedStates
 
@@ -265,9 +271,23 @@ getAllEATransitionsMatching deaEvent (t:ts) = let rest = getAllEATransitionsMatc
                                                 in case EA.event t of
                                                      EA.Tau -> rest
                                                      EA.DEAEvent deaEvent2 -> if deaEvent == deaEvent2
-                                                                              then  [t] ++ rest
+                                                                              then [t] ++ rest
                                                                               else rest
             
+-- deaEventsEqual :: DEA.Event -> DEA.Event -> Bool
+-- deaEventsEqual (DEA.UponEntry (DEA.FunctionCall label1 params1)) (DEA.UponEntry (DEA.FunctionCall label2 params2)) = if label1 == label2
+--                                                                                                                       then case (params1, params2) of
+--                                                                                                                             (Just (UntypedParameterList par1), Just (UntypedParameterList par2)) -> length par1 == length par2
+--                                                                                                                             _ -> False
+--                                                                                                                       else False
+-- deaEventsEqual (DEA.UponExit (DEA.FunctionCall label1 params1)) (DEA.UponExit (DEA.FunctionCall label2 params2)) = if label1 == label2
+--                                                                                                                       then case (params1, params2) of
+--                                                                                                                             (Just (UntypedParameterList par1), Just (UntypedParameterList par2)) -> length par1 == length par2
+--                                                                                                                             _ -> False
+--                                                                                                                       else False
+-- deaEventsEqual (DEA.VariableAssignment varId1 _) (DEA.VariableAssignment varId2 _) = varId1 == varId2
+
+
 getAllDEATransitionsMatching :: EA.Event -> [DEA.Transition] -> [DEA.Transition]
 getAllDEATransitionsMatching eaEvent [] = []
 getAllDEATransitionsMatching eaEvent (t:ts) = if propertyEventMatchesEAEvent (DEA.event (DEA.label t)) eaEvent
