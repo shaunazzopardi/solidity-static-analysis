@@ -10,6 +10,7 @@
 -- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Main where
 
@@ -21,13 +22,16 @@ import System.IO.Error
 
 import Text.Parsec hiding (try)
 import Text.Parsec.String
+import Text.Parsec.Token
 import Solidity
 import CFG
 import StaticAnalysis
-import StaticAnalysis.Residuals
-import EA.EA
+import StaticAnalysis.ComplianceChecking as ComplianceChecking
+import StaticAnalysis.ICFG as ICFG
 import Parseable
 import DEA
+import Numeric
+import Numeric.Natural
 
 type Filename = String
 
@@ -41,21 +45,21 @@ parseIO :: Parseable a => Filename -> String -> IO a
 parseIO filename = either (fail . (parseError ++) . show) return . parse parser ""
   where
     parseError = "Error during parsing of <"++filename++">\n"
-    
+
+
 main =
-  do
-    arguments <- getArgs
-    ifNot (length arguments == 3)
-      ("Usage: <input solidity file> <input dea file> <output dea file>")
-    let [inSCFile, inDEAFile, outFile] = arguments
-    inputText <- readFile inSCFile
-      `failWith` ("Cannot read Solidity file <"++inSCFile++">")
-    solidityCode <- parseIO inSCFile inputText
-    inputDEA <- readFile inDEAFile
-      `failWith` ("Cannot read DEA file <"++inDEAFile++">")
-    dea <- parseIO inDEAFile inputDEA
-    let outDEA = (performResidualAnalysisOnContractSpecification dea (fromCFG (contractCFG solidityCode) dea))
-    writeFile outFile (display outDEA)
-      `failWith` ("Cannot write to DEA file <"++outFile++">")
-    putStrLn ("Created residual DEA file <"++outFile++">")
-  `catch` (putStrLn . ioeGetErrorString)
+  do  arguments <- getArgs
+      ifNot (length arguments == 3)
+        ("Usage: <input solidity file> <input dea file> <output icfg file>")
+      let [inSCFile, inDEAFile, outFile] = arguments
+      inputText <- readFile inSCFile
+        `failWith` ("Cannot read Solidity file <"++inSCFile++">")
+      solidityCode <- parseIO inSCFile inputText
+      inputDEA <- readFile inDEAFile
+        `failWith` ("Cannot read DEA file <"++inDEAFile++">")
+      dea <- parseIO inDEAFile inputDEA
+      let outICFG = ICFG.instrument (CFG.contractCFG solidityCode) dea
+      writeFile outFile ((display outICFG))
+        `failWith` ("Cannot write to ICFG file <"++outFile++">")
+      putStrLn ("Created residual ICFG file <"++outFile++">")
+    `catch` (putStrLn . ioeGetErrorString)
