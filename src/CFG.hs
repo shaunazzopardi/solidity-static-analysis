@@ -13,5 +13,5 @@
 
 module CFG (module CFG.CFG, module CFG.Parsing) where
 
-import CFG.CFG
-import CFG.Parsing
+  import CFG.CFG
+  import CFG.Parsing
