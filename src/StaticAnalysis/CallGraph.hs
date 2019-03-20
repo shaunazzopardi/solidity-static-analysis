@@ -20,7 +20,9 @@ module StaticAnalysis.CallGraph where
 
   callgraph :: CFG.CFG -> CallGraph
   callgraph (CFG.CFG []) = CallGraph [] []
-  callgraph (CFG.CFG funcs) = CallGraph [(func, funcc) | func <- funcs, funcc <- funcs, s <- (states func), funcc <- mustCall s (CFG.CFG funcs)] [(func, funcc) | func <- funcs, funcc <- funcs, s <- (states func), funcc <- mayCall s (CFG.CFG funcs)]
+  callgraph (CFG.CFG funcs) = CallGraph
+                              [(func, funcc) | func <- funcs, funcc <- funcs, s <- (states func), elem funcc $ mustCall s (CFG.CFG funcs)]
+                              [(func, funcc) | func <- funcs, funcc <- funcs, s <- (states func), elem funcc $ (mayCall s (CFG.CFG funcs))]
 
 
   mustCall :: CFG.State -> CFG.CFG -> [CFG.FunctionCFG]
@@ -38,8 +40,8 @@ module StaticAnalysis.CallGraph where
 
   icallgraph :: ICFG.ICFG -> ICallGraph
   icallgraph (ICFG.ICFG []) = ICallGraph [] []
-  icallgraph (ICFG.ICFG funcs) = let must = (nub [(func, funcc) | func <- funcs, funcc <- funcs, s <- (ICFG.istates func), funcc <- iMustCall s (ICFG.ICFG funcs)])
-                                     may = (nub [(func, funcc) | func <- funcs, funcc <- funcs, s <- (ICFG.istates func), funcc <- iMayCall s (ICFG.ICFG funcs)])
+  icallgraph (ICFG.ICFG funcs) = let must = (nub [(func, funcc) | func <- funcs, funcc <- funcs, s <- (ICFG.istates func), elem funcc $ iMustCall s (ICFG.ICFG funcs)])
+                                     may = (nub [(func, funcc) | func <- funcs, funcc <- funcs, s <- (ICFG.istates func), elem funcc $ iMayCall s (ICFG.ICFG funcs)])
                                   in ICallGraph must may
 
 
