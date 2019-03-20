@@ -2,6 +2,7 @@ module CFG.CFG (State(..), Condition(..), Transition(..), FunctionCFG(..), CFG(.
 
 import Solidity.Solidity
 import Data.List
+import Debug.Trace
 
 type SCAddress = String
 
@@ -33,7 +34,7 @@ data State = BasicState {
 data Condition = ConditionHolds ExpressionList | ConditionDoesNotHold ExpressionList | TT | FF deriving (Eq, Ord, Show)
 
 data FunctionCall = FunctionCall FunctionName (Maybe (Either NameValueList ExpressionList))
-                    | OutsideFunctionCall Expression FunctionName (Maybe (Either NameValueList ExpressionList))  deriving (Eq, Ord, Show)
+                    | OutsideFunctionCall (Maybe Expression) FunctionName (Maybe (Either NameValueList ExpressionList))  deriving (Eq, Ord, Show)
 
 data FunctionVisibility = Public | Private | FInternal | FExternal deriving (Eq, Ord, Show)
 
@@ -88,9 +89,39 @@ contractCFGFromContractDefinition contractDefinition =
                                             let contractPartss = contractParts contractDefinition
                                                 modifierCFGs = justifyList (map (parseModifierCFG) contractPartss)
                                                 properFunctionsCFGs = justifyList (map (parseFunctionCFG modifierCFGs) contractPartss)
-                                              in map (handleAssertAndRequires properFunctionsCFGs) properFunctionsCFGs
+                                                withProperAssertAndRequires = map (handleAssertAndRequires properFunctionsCFGs) properFunctionsCFGs
+                                              in map (handleFalseFunctionCalls withProperAssertAndRequires) withProperAssertAndRequires
 --------------------------------------------------------------
 --------------------------------------------------------------
+--check that if it is a local function call, but there is no local function with that name then treat it as an outside function call state, for soundness
+-- e.g. creating a new smart contract will be parsed as a local function call naively, but it executes the constructor at a certain address, i.e. it calls an outside function.
+
+handleFalseFunctionCalls :: [FunctionCFG] -> FunctionCFG -> FunctionCFG
+handleFalseFunctionCalls [] cfg = cfg
+handleFalseFunctionCalls cfgs cfg = handleFalseFunctionCallsStates (states cfg) cfgs cfg
+
+handleFalseFunctionCallsStates :: [State] -> [FunctionCFG] -> FunctionCFG -> FunctionCFG
+handleFalseFunctionCallsStates [] _ cfg = cfg
+handleFalseFunctionCallsStates ((FunctionCallState l (FunctionCall name (Just (Left nvl)))):sts) cfgs cfg
+                                    = let newCFG = if (null [fcg | fcg <- cfgs, name == functionName (signature fcg)])
+                                                        then let newState = (StatementState l (SimpleStatementExpression (FunctionCallNameValueList (Literal (PrimaryExpressionIdentifier name)) (Just nvl))))
+                                                                 oldState = (FunctionCallState l (FunctionCall name (Just (Left nvl))))
+                                                                in replaceStateWithState cfg oldState newState
+                                                        else cfg
+                                        in handleFalseFunctionCallsStates sts cfgs newCFG
+
+handleFalseFunctionCallsStates ((FunctionCallState l (FunctionCall name (Just (Right expl)))):sts) cfgs cfg
+                                    = let newCFG = if (null [fcg | fcg <- cfgs, name == functionName (signature fcg)])
+                                                        then let newState = (StatementState l (SimpleStatementExpression (FunctionCallExpressionList (Literal (PrimaryExpressionIdentifier name)) (Just expl))))
+                                                                 oldState = (FunctionCallState l (FunctionCall name (Just (Right expl))))
+                                                                in replaceStateWithState cfg oldState newState
+                                                        else cfg
+                                        in handleFalseFunctionCallsStates sts cfgs newCFG
+
+handleFalseFunctionCallsStates (s:sts) cfgs cfg = handleFalseFunctionCallsStates sts cfgs cfg
+
+------------------------------------
+------------------------------------
 
 justifyList :: [Maybe FunctionCFG] -> [FunctionCFG]
 justifyList [] = []
@@ -429,12 +460,12 @@ cfgStepWithExpression (FunctionCallNameValueList (Literal (PrimaryExpressionIden
 cfgStepWithExpression (FunctionCallNameValueList (MemberAccess expression functionName) (Just (NameValueList nameValueList))) cfg state =
                             let expressions = map (snd) nameValueList
                                 (newCFG, newState) = cfgStepWithExpressions expressions cfg state
-                                functionCall = OutsideFunctionCall expression functionName (Just (Left (NameValueList nameValueList)))
+                                functionCall = OutsideFunctionCall (Just expression) functionName (Just (Left (NameValueList nameValueList)))
                             in addFunctionTransition functionCall newCFG newState
 
 
 cfgStepWithExpression (FunctionCallNameValueList (MemberAccess expression functionName) (Nothing)) cfg state =
-                          let functionCall = OutsideFunctionCall expression functionName Nothing
+                          let functionCall = OutsideFunctionCall (Just expression) functionName Nothing
                             in addFunctionTransition (functionCall) cfg state
 
 --add transitions for each expression in name value list
@@ -453,7 +484,7 @@ cfgStepWithExpression (FunctionCallExpressionList (Literal (PrimaryExpressionIde
 
 cfgStepWithExpression (FunctionCallExpressionList (MemberAccess expression functionName) Nothing) cfg state =
                         let (newCFG, newState) = cfgStepWithExpression expression cfg state
-                            functionCall = OutsideFunctionCall expression functionName (Nothing)
+                            functionCall = OutsideFunctionCall (Just expression) functionName (Nothing)
                            in addFunctionTransition functionCall newCFG newState
 
 
@@ -461,7 +492,7 @@ cfgStepWithExpression (FunctionCallExpressionList (MemberAccess expression funct
                         let (newCFG, newState) = cfgStepWithExpression expression cfg state
                             rawExpressionList = unExpressionList expressionList
                             (cfgWithList, stateAfterList) = cfgStepWithExpressions rawExpressionList newCFG newState
-                            functionCall = OutsideFunctionCall expression functionName (Just (Right expressionList))
+                            functionCall = OutsideFunctionCall (Just expression) functionName (Just (Right expressionList))
                            in addFunctionTransition (functionCall) cfgWithList stateAfterList
 
 
@@ -480,10 +511,10 @@ addFunctionTransition (FunctionCall functionName maybeParameters) cfg state  =
                         --  cfgWithExitTransition = addState (addState (addTransition cfgWithEntryTransition exitTransition) (dst entryTransition)) (dst exitTransition)
                             in (cfgWithEntryTransition, dst entryTransition)
 
---OutsideFunctionCall Expression FunctionName (Maybe (Either NameValueList ExpressionList))
+--OutsideFunctionCall (Just expression) FunctionName (Maybe (Either NameValueList ExpressionList))
 
-addFunctionTransition (OutsideFunctionCall expr functionName maybeParameters) cfg state  =
-                                                    let entryTransition = Transition{src = state, dst = FunctionCallState{label = nextLabel cfg, functionCall = (OutsideFunctionCall expr functionName maybeParameters)}, condition = TT}
+addFunctionTransition (OutsideFunctionCall (Just expr) functionName maybeParameters) cfg state  =
+                                                    let entryTransition = Transition{src = state, dst = FunctionCallState{label = nextLabel cfg, functionCall = (OutsideFunctionCall (Just expr) functionName maybeParameters)}, condition = TT}
                                                         cfgWithEntryTransition = (addState (addTransition cfg entryTransition) (dst entryTransition))
                                                 --        exitTransition = Transition{src = dst entryTransition, dst = BasicState{label = nextLabel cfgWithEntryTransition}, condition = Exiting (OutsideFunctionCall expr functionName maybeParameters)}
                                                     --    cfgWithExitTransition = addState (addState (addTransition cfgWithEntryTransition exitTransition) (dst entryTransition)) (dst exitTransition)
@@ -859,7 +890,7 @@ functionCallStatesToAssertOrRequire (s:ss) cfg = let newCFG = functionCallToAsse
 
 
 --    data FunctionCall = FunctionCall FunctionName (Maybe (Either NameValueList ExpressionList))
---                        | OutsideFunctionCall Expression FunctionName (Maybe (Either NameValueList ExpressionList))  deriving (Eq, Ord, Show)
+--                        | OutsideFunctionCall (Just expression) FunctionName (Maybe (Either NameValueList ExpressionList))  deriving (Eq, Ord, Show)
 
 functionCallToAssertOrRequire :: State -> FunctionCFG -> FunctionCFG
 functionCallToAssertOrRequire (FunctionCallState label (FunctionCall (Identifier "require") (Just (Right (ExpressionList [expression]))))) cfg =
@@ -876,6 +907,7 @@ functionCallToAssertOrRequire (FunctionCallState label (FunctionCall (Identifier
                                                                   initial = initial newCFG,
                                                                   end = end newCFG
                                                               }
+
 functionCallToAssertOrRequire (FunctionCallState label (FunctionCall (Identifier "assert") (Just (Right (ExpressionList [expression]))))) cfg =
                                                             let callState = (FunctionCallState label (FunctionCall (Identifier "assert") (Just (Right (ExpressionList [expression])))))
                                                                 newState = (StatementState label (SimpleStatementExpression (FunctionCallExpressionList  (Literal (PrimaryExpressionIdentifier (Identifier {unIdentifier = "assert"}))) (Just ((ExpressionList [expression]))))))
