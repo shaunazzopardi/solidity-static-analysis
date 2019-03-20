@@ -23,7 +23,7 @@ module StaticAnalysis.ICFG (ICFG(..), IFunctionCFG(..), IEvent(..), ITransition(
       iend :: [CFG.State]
   } deriving (Eq, Ord, Show)
 
-  data ICFG = ICFG [IFunctionCFG]
+  data ICFG = ICFG [IFunctionCFG] deriving (Eq, Ord, Show)
 
   instrument :: CFG -> DEA -> ICFG
   instrument (CFG []) _ = ICFG []
