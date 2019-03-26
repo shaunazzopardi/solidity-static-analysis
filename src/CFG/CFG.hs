@@ -4,6 +4,9 @@ import Solidity.Solidity
 import Data.List
 import Debug.Trace
 
+--TODO allow intermediate expression states to be ignored
+--TODO turn ternary conditional operator to be turned into if-then-else statement
+
 type SCAddress = String
 
 data State = BasicState {
@@ -31,7 +34,7 @@ data State = BasicState {
     deriving (Eq, Ord, Show)
 
 
-data Condition = ConditionHolds ExpressionList | ConditionDoesNotHold ExpressionList | TT | FF deriving (Eq, Ord, Show)
+data Condition = ConditionHolds Expression | ConditionDoesNotHold Expression | TT | FF deriving (Eq, Ord, Show)
 
 data FunctionCall = FunctionCall FunctionName (Maybe (Either NameValueList ExpressionList))
                     | OutsideFunctionCall (Maybe Expression) FunctionName (Maybe (Either NameValueList ExpressionList))  deriving (Eq, Ord, Show)
@@ -95,6 +98,7 @@ contractCFGFromContractDefinition contractDefinition =
 --------------------------------------------------------------
 --check that if it is a local function call, but there is no local function with that name then treat it as an outside function call state, for soundness
 -- e.g. creating a new smart contract will be parsed as a local function call naively, but it executes the constructor at a certain address, i.e. it calls an outside function.
+--TODO handle send and transfer
 
 handleFalseFunctionCalls :: [FunctionCFG] -> FunctionCFG -> FunctionCFG
 handleFalseFunctionCalls [] cfg = cfg
@@ -114,6 +118,32 @@ handleFalseFunctionCallsStates ((FunctionCallState l (FunctionCall name (Just (R
                                     = let newCFG = if (null [fcg | fcg <- cfgs, name == functionName (signature fcg)])
                                                         then let newState = (StatementState l (SimpleStatementExpression (FunctionCallExpressionList (Literal (PrimaryExpressionIdentifier name)) (Just expl))))
                                                                  oldState = (FunctionCallState l (FunctionCall name (Just (Right expl))))
+                                                                in replaceStateWithState cfg oldState newState
+                                                        else cfg
+                                        in handleFalseFunctionCallsStates sts cfgs newCFG
+
+--cfgStepWithExpression (FunctionCallNameValueList (MemberAccess expression functionName) (Just (NameValueList nameValueList))) cfg state =
+  --                          let expressions = map (snd) nameValueList
+    --                            (newCFG, newState) = cfgStepWithExpressions expressions cfg state
+      --                          functionCall = OutsideFunctionCall (Just expression) functionName (Just (Left (NameValueList nameValueList)))
+        --                    in addFunctionTransition functionCall newCFG newState
+
+
+handleFalseFunctionCallsStates ((FunctionCallState l (OutsideFunctionCall (Just expression) name (Just (Left (NameValueList nameValueList))))):sts) cfgs cfg
+                                    = let newCFG = if ((name == Identifier "transfer" || name == Identifier "send" || name == Identifier "call" || name == Identifier "delegateCall")
+                                                            && null [fcg | fcg <- cfgs, name == functionName (signature fcg)])
+                                                        then let newState = (StatementState l (SimpleStatementExpression (FunctionCallNameValueList (MemberAccess expression name) (Just (NameValueList nameValueList)))))
+                                                                 oldState = (FunctionCallState l (OutsideFunctionCall (Just expression) name (Just (Left (NameValueList nameValueList)))))
+                                                                in replaceStateWithState cfg oldState newState
+                                                        else cfg
+                                        in handleFalseFunctionCallsStates sts cfgs newCFG
+
+
+handleFalseFunctionCallsStates ((FunctionCallState l (OutsideFunctionCall (Just expression) name (Just (Right (ExpressionList exprList))))):sts) cfgs cfg
+                                    = let newCFG = if ((name == Identifier "transfer" || name == Identifier "send" || name == Identifier "call" || name == Identifier "delegateCall")
+                                                            && null [fcg | fcg <- cfgs, name == functionName (signature fcg)])
+                                                        then let newState = (StatementState l (SimpleStatementExpression (FunctionCallExpressionList (MemberAccess expression name) (Just (ExpressionList exprList)))))
+                                                                 oldState = (FunctionCallState l (OutsideFunctionCall (Just expression) name (Just (Right (ExpressionList exprList)))))
                                                                 in replaceStateWithState cfg oldState newState
                                                         else cfg
                                         in handleFalseFunctionCallsStates sts cfgs newCFG
@@ -162,7 +192,7 @@ parseFunctionCFG modifierCFGs (ContractPartFunctionDefinition (Just id) params f
                                                       end = []
                                                   }
                                             (newCFG, state) = (cfgStepWithStatement (BlockStatement block) cfg (initial cfg))
-                                            finalCFG = (addEndState newCFG state)
+                                            finalCFG = newCFG--(addEndState newCFG state)
                                             relevantModifierCFGs = respectiveModifierCFGs functionDefinitionTags modifierCFGs
                                             in Just (addModifiersControlFlow finalCFG relevantModifierCFGs)
 
@@ -199,7 +229,7 @@ addEndStates fcfg = FunctionCFG{
                       transitions = transitions fcfg ++ [Transition s ReturnState TT | s <- states fcfg, s /= ThrowState, s /= RevertState, s /= ReturnState, hasNoOutgoingTransitions s fcfg],
                       states = states fcfg ++ [ReturnState],
                       initial = initial fcfg,
-                      end = end fcfg
+                      end = (end fcfg) ++ [ReturnState] ++ [RevertState | RevertState <- (states fcfg)] ++ [ThrowState | ThrowState <- (states fcfg)]
                   }
 
 --------------------------------------------------------------
@@ -228,7 +258,7 @@ parseModifierCFG (ContractPartModifierDefinition modifierName maybeParameterList
                                                       end = []
                                                   }
                                             (newCFG, state) = (cfgStepWithStatement (BlockStatement block) cfg (initial cfg))
-                                            in Just (addEndState newCFG state)
+                                            in Just newCFG --(addEndState newCFG state)
 
 parseModifierCFG _ = Nothing
 
@@ -589,11 +619,11 @@ cfgStepWithStatement (IfStatement expression ifTrueStatement maybeIfFalseStateme
         ifStmt = (IfStatement expression ifTrueStatement maybeIfFalseStatement)
         transitionToIf = Transition{src = newState, dst = StatementState (nextLabel newCFG) (ifStmt), condition = TT}
 
-        transitionIfTrue = Transition{src = dst transitionToIf, dst = BasicState (nextLabel newCFG), condition = ConditionHolds (ExpressionList [expression])}
+        transitionIfTrue = Transition{src = dst transitionToIf, dst = BasicState (nextLabel newCFG), condition = ConditionHolds (expression)}
         cfgWithTransition = addTransition (addStates newCFG [src transitionIfTrue, dst transitionIfTrue]) transitionIfTrue
         (cfgWithIfTrueBlock, ifTrueEndState) = (cfgStepWithStatement ifTrueStatement cfgWithTransition (dst transitionIfTrue))
 
-        transitionIfFalse = Transition{src = dst transitionToIf, dst = BasicState (nextLabel newCFG), condition = ConditionDoesNotHold (ExpressionList [expression])}
+        transitionIfFalse = Transition{src = dst transitionToIf, dst = BasicState (nextLabel newCFG), condition = ConditionDoesNotHold (expression)}
         cfgIfTrueWithTransition = addTransition (addState cfgWithIfTrueBlock (dst transitionIfFalse)) transitionIfFalse
         (cfgWithIfFalseBlock, ifFalseEndState) = if(maybeIfFalseStatement /= Nothing)
                                         then let Just s = maybeIfFalseStatement
@@ -673,13 +703,13 @@ cfgStepWithStatement (ForStatement (statement1, expression1, expression2) statem
                         conditionTrueState = BasicState (nextLabel cfgWithExpression1)
                         conditionCheckTrueTransition = Transition{src = stateAfterConditionCheck, dst = conditionTrueState, condition = if(expression1 /= Nothing)
                                                             then let Just e = expression1
-                                                                    in ConditionHolds (ExpressionList [e])
+                                                                    in ConditionHolds (e)
                                                             else TT}--no condition means true
                         cfgWithTrueState = addTransition (addState cfgWithExpression1 conditionTrueState) conditionCheckTrueTransition --add condition holds transition
                         conditionFalseState = BasicState (nextLabel cfgWithTrueState)
                         conditionCheckFalseTransition = Transition{src = stateAfterConditionCheck, dst = conditionFalseState, condition = if(expression1 /= Nothing)
                                                           then let Just e = expression1
-                                                                in ConditionDoesNotHold (ExpressionList [e])
+                                                                in ConditionDoesNotHold (e)
                                                           else TT} --will not be added in this case
                         cfgWithFalseState = if(expression1 /= Nothing)
                                                 then addTransition (addState cfgWithTrueState conditionTrueState) conditionCheckFalseTransition
@@ -715,10 +745,10 @@ cfgStepWithMaybeStatement (Just statement) cfg state = cfgStepWithStatement stat
 cfgBranchOnConditionCheck :: Expression -> FunctionCFG -> State -> (FunctionCFG, State, State)
 cfgBranchOnConditionCheck expression cfg state =
                 let conditionTrueState = BasicState (nextLabel cfg)
-                    trueTransition = Transition{src = state, dst = conditionTrueState, condition = ConditionHolds (ExpressionList [expression])}
+                    trueTransition = Transition{src = state, dst = conditionTrueState, condition = ConditionHolds (expression)}
                     cfgWithExpressionWithTrueState = addTransition (addState cfg conditionTrueState) trueTransition
                     conditionFalseState = BasicState (nextLabel cfgWithExpressionWithTrueState)
-                    falseTransition = Transition{src = state, dst = conditionFalseState, condition = ConditionDoesNotHold (ExpressionList [expression])}
+                    falseTransition = Transition{src = state, dst = conditionFalseState, condition = ConditionDoesNotHold (expression)}
                     cfgWithExpressionWithFalseState = addTransition (addState cfgWithExpressionWithTrueState conditionFalseState) falseTransition
                     in (cfgWithExpressionWithFalseState, conditionTrueState, conditionFalseState)
 
@@ -897,8 +927,11 @@ functionCallToAssertOrRequire (FunctionCallState label (FunctionCall (Identifier
                                                     let callState = (FunctionCallState label (FunctionCall (Identifier "require") (Just (Right (ExpressionList [expression])))))
                                                         newState = (StatementState label (SimpleStatementExpression (FunctionCallExpressionList  (Literal (PrimaryExpressionIdentifier (Identifier {unIdentifier = "require"}))) (Just ((ExpressionList [expression]))))))
                                                         newCFG = replaceStateWithState cfg callState newState
-                                                        newTransitions = [reLabelTransition t (ConditionHolds (ExpressionList [expression])) | t <- (transitions newCFG), src t  == newState]
-                                                        falseTransition = Transition newState RevertState (ConditionDoesNotHold (ExpressionList [expression]))
+                                                        newTransitions = let existingTransitions = [reLabelTransition t (ConditionHolds (expression)) | t <- (transitions newCFG), src t  == newState]
+                                                                            in if null existingTransitions
+                                                                                  then [Transition newState ReturnState (ConditionHolds (expression))]
+                                                                                  else existingTransitions
+                                                        falseTransition = Transition newState RevertState (ConditionDoesNotHold (expression))
                                                         otherTransitions = (transitions newCFG) \\ [t | t <- (transitions newCFG), src t == newState]
                                                       in FunctionCFG{
                                                                   signature = signature newCFG,
@@ -913,8 +946,11 @@ functionCallToAssertOrRequire (FunctionCallState label (FunctionCall (Identifier
                                                                 newState = (StatementState label (SimpleStatementExpression (FunctionCallExpressionList  (Literal (PrimaryExpressionIdentifier (Identifier {unIdentifier = "assert"}))) (Just ((ExpressionList [expression]))))))
                                                                 newCFG = replaceStateWithState cfg callState newState
 
-                                                                newTransitions = [Transition newState s (ConditionHolds (ExpressionList [expression])) | Transition newState s _ <- (transitions newCFG)]
-                                                                falseTransition = Transition newState ThrowState (ConditionDoesNotHold (ExpressionList [expression]))
+                                                                newTransitions = let existingTransitions = [reLabelTransition t (ConditionHolds (expression)) | t <- (transitions newCFG), src t  == newState]
+                                                                                    in if null existingTransitions
+                                                                                          then [Transition newState ReturnState (ConditionHolds (expression))]
+                                                                                          else existingTransitions
+                                                                falseTransition = Transition newState ThrowState (ConditionDoesNotHold (expression))
                                                                 otherTransitions = (transitions newCFG) \\ [t | t <- (transitions newCFG), src t /= newState]
                                                           in FunctionCFG{
                                                                       signature = signature newCFG,
