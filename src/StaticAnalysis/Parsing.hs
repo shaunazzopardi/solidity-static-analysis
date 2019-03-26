@@ -148,6 +148,20 @@ instance Parseable SyncTransition where
 
 instance Parseable SyncComp where
     display (SyncComp first configs evols transClosure) =
-      "digraph \"syncComp\"{\n" ++
-                    foldr (++) "" (map display evols)
+      "digraph \"syncComp\"{\n"
+                    ++  foldr (++) "" (map display evols)
+                   ++  foldr (++) "" (nub [display (s,d) ++ "[style=filled, color=blue]" ++ ";\n" | (s,d) <- configs, s == ReturnState])
+                   ++  foldr (++) "" (nub [display (s,d) ++ "[style=filled, color=red]" ++ ";\n" | (s,d) <- configs, s == RevertState])
+                   ++  foldr (++) "" (nub [display (s,d) ++ "[style=filled, color=red]" ++ ";\n" | (s,d) <- configs, s == ThrowState])
                   ++ "\n}"
+
+
+
+--instance Parseable SyncComp where
+  --  display (SyncComp first configs evols transClosure) =
+    --  "digraph \"syncComp\"{\n"
+      --              ++  foldr (++) "" (map display evols)
+        --           ++  foldr (++) "" (nub [display (s,d,ass) ++ "[style=filled, color=blue]" ++ ";\n" | (s,d,ass) <- configs, s == ReturnState])
+          --         ++  foldr (++) "" (nub [display (s,d,ass) ++ "[style=filled, color=red]" ++ ";\n" | (s,d,ass) <- configs, s == RevertState])
+            --       ++  foldr (++) "" (nub [display (s,d,ass) ++ "[style=filled, color=red]" ++ ";\n" | (s,d,ass) <- configs, s == ThrowState])
+              --    ++ "\n}"
