@@ -3,7 +3,9 @@ module StaticAnalysis.ICFG (ICFG(..), IFunctionCFG(..), IEvent(..), ITransition(
   import Solidity.Solidity
   import Data.List
   import CFG.CFG as CFG
+  import CFG.Parsing
   import DEA.DEA as DEA
+  import Debug.Trace
 
   data IEvent = Epsilon | DEAEvent Event deriving (Eq, Ord, Show)
 
@@ -31,18 +33,19 @@ module StaticAnalysis.ICFG (ICFG(..), IFunctionCFG(..), IEvent(..), ITransition(
 
 
   instrumentFunction :: DEA -> FunctionCFG -> IFunctionCFG
-  instrumentFunction dea cfg = let  events = getEventsFromDEA dea
-                                    itransitions = [ITransition s d c Epsilon | CFG.Transition s d c <- CFG.transitions cfg, afterStateEvent cfg s events == Epsilon, beforeStateEvent cfg d events == Epsilon]
+  instrumentFunction dea cfg = let  events = (getEventsFromDEA dea)
+                                    itransitionss = [ITransition s d c Epsilon | CFG.Transition s d c <- CFG.transitions cfg, afterStateEvent cfg s events == Epsilon, beforeStateEvent cfg d events == Epsilon]
                                                   ++ [ITransition s d c (afterStateEvent cfg s events) | CFG.Transition s d c <- CFG.transitions cfg, afterStateEvent cfg s events /= Epsilon, beforeStateEvent cfg d events == Epsilon]
-                                                 ++ [ITransition s d c (beforeStateEvent cfg d events) | CFG.Transition s d c <- CFG.transitions cfg, afterStateEvent cfg s events == Epsilon, beforeStateEvent cfg d events == Epsilon]
+                                                 ++ [ITransition s d c (beforeStateEvent cfg d events) | CFG.Transition s d c <- CFG.transitions cfg, afterStateEvent cfg s events == Epsilon, beforeStateEvent cfg d events /= Epsilon]
                                                   ++ (foldr (++) [] [[ITransition s newState c (afterStateEvent cfg s events), ITransition newState d c (beforeStateEvent cfg d events)] | CFG.Transition s d c <- CFG.transitions cfg, afterStateEvent cfg s events /= Epsilon, beforeStateEvent cfg d events/= Epsilon, let newState = BasicState ((CFG.label s) ++ "/" ++ (CFG.label d))])
-                                in IFunctionCFG{
+                                    icfg = IFunctionCFG{
                                     isignature = CFG.signature cfg,
-                                    itransitions = nub itransitions,
-                                    istates = nub $ foldr (++) [] [[isrc t, idst t] | t <- itransitions],
+                                    itransitions = (nub itransitionss),
+                                    istates =  foldr (++) [] [[isrc t, idst t] | t <- itransitionss],
                                     iinitial = CFG.initial cfg,
                                     iend = CFG.end cfg
                                 }
+                                in icfg
 
 
   replicateTranstionForEvents :: CFG.Transition -> [IEvent] -> [ITransition]
@@ -54,8 +57,8 @@ module StaticAnalysis.ICFG (ICFG(..), IFunctionCFG(..), IEvent(..), ITransition(
   beforeStateEvent :: FunctionCFG -> CFG.State -> [Event] -> IEvent
   beforeStateEvent _ _ [] = Epsilon
   beforeStateEvent cfg s ((UponExit (DEA.FunctionCall fName untypedParams)): rest) = if((CFG.functionName (CFG.signature cfg)) == fName && elem s (CFG.end cfg))
-                                                                                          then DEAEvent (UponExit (DEA.FunctionCall fName untypedParams))
-                                                                                          else beforeStateEvent cfg s rest
+                                                                                                    then DEAEvent (UponExit (DEA.FunctionCall fName untypedParams))
+                                                                                                    else beforeStateEvent cfg s rest
   beforeStateEvent _ _ _ = Epsilon
 
   afterStateEvent :: FunctionCFG -> CFG.State -> [Event] -> IEvent
