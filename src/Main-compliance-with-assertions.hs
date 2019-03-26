@@ -1,0 +1,74 @@
+--
+-- Licensed under the Apache License, Version 2.0 (the "License");
+-- you may not use this file except in compliance with the License.
+-- You may obtain a copy of the License at
+--
+--     http://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing, software
+-- distributed under the License is distributed on an "AS IS" BASIS,
+-- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-- See the License for the specific language governing permissions and
+-- limitations under the License.
+{-# LANGUAGE ScopedTypeVariables #-}
+
+module Main where
+
+import System.Environment
+import System.Exit
+import Control.Exception.Base
+import System.IO
+import System.IO.Error
+
+import Text.Parsec hiding (try)
+import Text.Parsec.String
+import Text.Parsec.Token
+import Solidity
+import CFG
+import StaticAnalysis.ParsingWithAssertions
+import StaticAnalysis.Util
+import StaticAnalysis.ComplianceCheckingWithAssertions as ComplianceChecking
+import StaticAnalysis.SMTInstrumentation
+import StaticAnalysis.ICFG as ICFG
+import StaticAnalysis.CallGraph as CallGraph
+import Parseable
+import DEA
+import Numeric
+import Numeric.Natural
+import Debug.Trace
+
+type Filename = String
+
+failWith :: IO a -> String -> IO a
+io `failWith` e = io `catch` (const $ (fail e) :: IOError -> IO a)
+
+ifNot :: Bool -> String -> IO ()
+ifNot c e = if c then return () else fail e
+
+parseIO :: Parseable a => Filename -> String -> IO a
+parseIO filename = either (fail . (parseError ++) . show) return . parse parser ""
+  where
+    parseError = "Error during parsing of <"++filename++">\n"
+
+
+main =
+  do  arguments <- getArgs
+      ifNot (length arguments == 4)
+        ("Usage: <number bigger than 0> <input solidity file> <input dea file> <output sync-comp file>")
+      let [inSCFile, inDEAFile, outFile, outcgFile] = arguments
+      inputText <- readFile inSCFile
+        `failWith` ("Cannot read Solidity file <"++inSCFile++">")
+      solidityCode <- parseIO inSCFile inputText
+      inputDEA <- readFile inDEAFile
+        `failWith` ("Cannot read DEA file <"++inDEAFile++">")
+      dea <- parseIO inDEAFile inputDEA
+      let cg = icallgraph (ICFG.instrument (CFG.contractCFG solidityCode) dea)
+      let icfg = (ICFG.instrument (CFG.contractCFG solidityCode) dea)
+      let outSyncComps = ComplianceChecking.testFunctionFlowAnalysis (0) icfg solidityCode dea
+      writeFile outFile (foldr (++) "" (map display outSyncComps))
+        `failWith` ("Cannot write to SyncComp file <"++outFile++">")
+      putStrLn ("Created residual SyncComp file <"++outFile++">")
+      writeFile outcgFile (display cg)
+        `failWith` ("Cannot write to CallGraph file <"++outcgFile++">")
+      putStrLn ("Created residual CallGraph file <"++outcgFile++">")
+    `catch` (putStrLn . ioeGetErrorString)

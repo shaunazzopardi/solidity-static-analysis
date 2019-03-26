@@ -1,11 +1,11 @@
-module StaticAnalysis.Util (transitionDEAWithEvent, isDelegate, getFirstFunctionWithName, getFirstCFGFunctionWithName) where
+module StaticAnalysis.Util (transitionDEAWithEvent, isDelegate, getFirstFunctionWithName, getFirstCFGFunctionWithName, transitionDEAWithEventWithGCL) where
 
   import qualified DEA.DEA as DEA
   import qualified CFG.CFG as CFG
   import qualified StaticAnalysis.ICFG as ICFG
   import Solidity.Solidity
   import Data.List
-
+  import Debug.Trace
 
   transitionDEAWithEvent :: DEA.DEA -> DEA.State -> ICFG.IEvent -> [DEA.State]
   transitionDEAWithEvent _ deaState ICFG.Epsilon = [deaState]
@@ -21,6 +21,60 @@ module StaticAnalysis.Util (transitionDEAWithEvent, isDelegate, getFirstFunction
                                                                       in if(matchingTransitions == [])
                                                                           then [deaState]
                                                                           else nextStates
+
+
+
+  transitionDEAWithEventWithGCL :: DEA.DEA -> DEA.State -> ICFG.IEvent -> [(DEA.State, Maybe Expression, Maybe Statement)]
+  transitionDEAWithEventWithGCL _ deaState ICFG.Epsilon = [(deaState, Nothing, Nothing)]
+  transitionDEAWithEventWithGCL  dea deaState (ICFG.DEAEvent deaEvent) = let transitionsAvailable = transitionsFromDEAState dea deaState
+                                                                             matchingTransitions = [deaTransition | deaTransition <- transitionsAvailable, (DEA.event (DEA.label deaTransition)) == deaEvent]
+                                                                             nextStatesWithGCL = [(DEA.dst deaTransition, cond , (DEA.action (DEA.label deaTransition)))
+                                                                                                                        | deaTransition <- matchingTransitions,
+                                                                                                                      Just (Literal (PrimaryExpressionBooleanLiteral (BooleanLiteral "false")))
+                                                                                                                                        /= (DEA.guard (DEA.label deaTransition)),
+                                                                                                                          let cond = (positiveConditionWithNegativeConditions (DEA.guard (DEA.label deaTransition)) [DEA.guard (DEA.label otherDEATrans) | otherDEATrans <- matchingTransitions, otherDEATrans /= deaTransition])]
+                                                                                                           ++ [(deaState, positiveConditionWithNegativeConditions Nothing [DEA.guard (DEA.label otherDEATrans) | otherDEATrans <- matchingTransitions, otherDEATrans /= deaTransition], Nothing)
+                                                                                                                        |  deaTransition <- matchingTransitions,
+                                                                                                                            Nothing /= (DEA.guard (DEA.label deaTransition)),
+                                                                                                                            Just (Literal (PrimaryExpressionBooleanLiteral (BooleanLiteral "true")))
+                                                                                                                                                /= (DEA.guard (DEA.label deaTransition))]
+                                                                              in if(matchingTransitions == [])
+                                                                                  then [(deaState, Nothing, Nothing)]
+                                                                                  else nextStatesWithGCL
+
+
+  positiveConditionWithNegativeConditions :: Maybe Expression -> [Maybe Expression] -> Maybe Expression
+  positiveConditionWithNegativeConditions Nothing others = let negativeExprs = [e | Just e <- others]
+                                                                  in if null negativeExprs
+                                                                        then Nothing
+                                                                        else negateAndExpr negativeExprs
+
+  positiveConditionWithNegativeConditions (Just expr) others = let negativeExprs = [e | Just e <- others]
+                                                                  in if null negativeExprs
+                                                                        then Just expr
+                                                                        else case negateAndExpr negativeExprs of
+                                                                                        Nothing -> Just expr
+                                                                                        Just exprr -> Just $ Binary "&&" expr exprr
+
+
+  negateAndExpr :: [Expression] -> Maybe Expression
+  negateAndExpr [] = Nothing
+  negateAndExpr (e:es) = case negateAndExpr es of
+                                Nothing -> Nothing
+                                Just expr -> Just $ Binary "&&" (Unary "!" e) expr
+
+--transitionDEAWithEventWithGCL :: DEA.DEA -> DEA.State -> ICFG.IEvent -> [(DEA.State, Maybe Expression, Maybe Statement)]
+--transitionDEAWithEventWithGCL _ deaState ICFG.Epsilon = [deaState, Nothing, Nothing]
+--transitionDEAWithEventWithGCL  dea deaState (ICFG.DEAEvent deaEvent) = let transitionsAvailable = transitionsFromDEAState dea deaState
+  --                                                                         matchingTransitions = [deaTransition | deaTransition <- transitionsAvailable, (DEA.event (DEA.label deaTransition)) == deaEvent]
+    --                                                                       nextStates = [DEA.dst deaTransition | deaTransition <- matchingTransitions,
+      --                                                                                                        Just (Literal (PrimaryExpressionBooleanLiteral (BooleanLiteral "false")))
+        --                                                                                                                        /= (DEA.guard (DEA.label deaTransition))]
+          --                                                                                         ++ [deaState |  deaTransition <- matchingTransitions,
+            --                                                                                                    Nothing /= (DEA.guard (DEA.label deaTransition)),
+              --                                                                                                  Just (Literal (PrimaryExpressionBooleanLiteral (BooleanLiteral "true")))
+                --                                                                                                                    /= (DEA.guard (DEA.label deaTransition))]
+                  --                                                          in [deaState] ++ [(dst t, guard (label t), action (label t)) | t <- matchingTransitions]
 
 
 
