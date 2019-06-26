@@ -1,0 +1,47 @@
+DEA WellBehaviour {
+		states {
+			Start: initial;
+			Ordered;
+			Delivered;
+			Refunding;
+			Paid;
+			Refunded;
+			Bad: bad;
+		}
+
+		transitions {
+			Start -[after(order(orderNo,eta)) | customer[orderNo] != msg.sender ]-> Bad;
+			Start -[after(delivery(orderNo)) | ]-> Bad;
+			Start -[after(refund(orderNo)) | ]-> Bad;
+
+			Start -[after(order(orderNo,eta)) | customer[orderNo] == msg.sender ]-> Ordered;
+
+			Ordered -[after(order(orderNo,eta)) | ]-> Bad;
+			Ordered -[after(delivery(orderNo)) | customer[orderNo] != msg.sender ]-> Bad;
+			Ordered -[before(refund(orderNo)) | owner != msg.sender ]-> Bad;
+
+			Ordered -[after(delivery(orderNo)) | customer[orderNo] == msg.sender ]-> Delivered;
+
+			Delivered -[after(order(orderNo,eta)) | ]-> Bad;
+			Delivered -[after(delivery(orderNo)) | ]-> Bad;
+			Delivered -[after(refund(orderNo)) | ]-> Bad;
+
+			Ordered -[before(refund(orderNo)) | msg.sender == owner ]-> Refunding;
+
+			Refunding -[after(order(orderNo,eta)) | ]-> Bad;
+			Refunding -[after(delivery(orderNo)) | ]-> Bad;
+			Refunding -[after(refund(orderNo)) | ]-> Bad;
+
+      Refunding -[before(transferTo(val, orderNo)) | ]-> Paid;
+
+      Paid -[after(order(orderNo,eta)) | ]-> Bad;
+      Paid -[after(delivery(orderNo)) | ]-> Bad;
+
+      Paid -[after(refund(orderNo)) |  ]-> Refunded;
+
+    	Refunded -[after(order(orderNo,eta)) | ]-> Bad;
+      Refunded -[after(delivery(orderNo)) | ]-> Bad;
+      Refunded -[after(refund(orderNo)) | ]-> Bad;
+
+		}
+	}

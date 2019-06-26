@@ -54,6 +54,11 @@ instance Parseable ITransition where
                 spaces
                 event <- parser
                 char '"'
+                spaces
+                char ']'
+                spaces
+                char ';'
+                spaces
                 return (ITransition (src) (dst) (cond) (event))
     display (ITransition src dst cond event) = (display src) ++ " -> " ++ (display dst) ++ " [label = \"" ++ (display cond) ++ " >> " ++ (display event) ++ "\"];\n"
 
@@ -133,28 +138,34 @@ instance Parseable ICallGraph where
                     ++ "\n}"
 
 
+
 instance Parseable Config where
     display (s,q, ([],[])) = "\"" ++ (stripChars "\"" ("(" ++ (display s) ++ ", " ++ (display q) ++ ", " ++ "(assert true)" ++ ")")) ++ "\""
-    display (s,q, (as,_)) = "\"" ++ (stripChars "\"" ("(" ++ (display s) ++ ", " ++ (display q) ++ ", " ++ (foldr (++) "" [(display z) | z <- as]) ++ ")")) ++ "\""
+  --  display (s,q, (as,_)) = "\"" ++ (stripChars "\"" ("(" ++ (display s) ++ ", " ++ (display q) ++ ", " ++ (foldr (++) "" [(display z) | z <- as]) ++ ")")) ++ "\""
+    display (s,q, (as,ssaContext)) = "\"" ++ (stripChars "\"" ("(" ++ (display s) ++ ", " ++ (display q) ++ ", " ++ (display ssaContext) ++ (foldr (++) "" [(display z) ++ " "| z <- as]) ++ ")")) ++ "\""
 
 
 --from https://www.rosettacode.org/wiki/Strip_a_set_of_characters_from_a_string#Haskell
 stripChars :: String -> String -> String
 stripChars = filter . flip notElem
 
+instance Parseable ProofObligationMap where
+    display (ProofObligationMap transitionPOs) = foldr (++) "" [((display t) ++ "\n\n" ++ (foldr (++) "" (map display po)) ++ "\n\n\n\n") | (t, po) <- transitionPOs]
+
+
 instance Parseable EventSeq where
     display [] = "<>"
     display (e:es) = "<" ++ (display e) ++ (foldr (++) "" [", " ++ display e | e <- es]) ++ ">"
 
 instance Parseable SyncTransition where
-    display (c, es, cc) = (display c) ++ " -> " ++ (display cc) ++ " [label = \"" ++ (display es) ++ "\"];\n"
+    display (SyncTransition c es as cc) = (display c) ++ " -> " ++ (display cc) ++ " [label = \"" ++ (display es) ++ " | " ++ (foldr (++) "" [(display z) | z <- as]) ++ "\"];\n"
 
 
 instance Parseable SyncComp where
-    display (SyncComp first configs evols transClosure) =
-      "digraph \"syncComp\"{\n" ++
+    display (SyncComp nm first configs evols transClosure) =
+      "digraph \"" ++ (display nm) ++ "\"{\n" ++
                     foldr (++) "" (map display evols)
-                     ++  foldr (++) "" (nub [display (s,d,abs) ++ "[style=filled, color=lightblue]" ++ ";\n" | (s,d,abs) <- configs, s == ReturnState])
-                     ++  foldr (++) "" (nub [display (s,d,abs) ++ "[style=filled, color=lightblue]" ++ ";\n" | (s,d,abs) <- configs, s == RevertState])
-                     ++  foldr (++) "" (nub [display (s,d,abs) ++ "[style=filled, color=lightblue]" ++ ";\n" | (s,d,abs) <- configs, s == ThrowState])
-                  ++ "\n}"
+                     ++  foldr (++) "" (nub [display (s,d,abss) ++ "[style=filled, color=lightblue]" ++ ";\n" | (s,d,abss) <- configs, s == ReturnState])
+                     ++  foldr (++) "" (nub [display (s,d,abss) ++ "[style=filled, color=lightblue]" ++ ";\n" | (s,d,abss) <- configs, s == RevertState])
+                     ++  foldr (++) "" (nub [display (s,d,abss) ++ "[style=filled, color=lightblue]" ++ ";\n" | (s,d,abss) <- configs, s == ThrowState])
+                  ++ "}\n\n\n\n"

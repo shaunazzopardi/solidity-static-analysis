@@ -1,6 +1,12 @@
 
 
-module StaticAnalysis.ComplianceCheckingWithAssertions (SyncComp(..), Config, SyncTransition, EventSeq, Cache(..), compliantWith, testFunctionFlowAnalysis, exhaustiveSteps, oneStep, oneSyntacticStep, configsAfter, functionFlowAnalysis, getCachedResult) where
+module StaticAnalysis.ComplianceCheckingWithAssertions (SyncComp(..),
+Config, SyncTransition, EventSeq, Cache(..),
+SyncTransition(..), ProofObligation, ProofObligationMap(..),
+compliantWith, testFunctionFlowAnalysis,
+exhaustiveSteps, oneStep, oneSyntacticStep,
+ configsAfter, functionFlowAnalysis,
+ getCachedResult, getProofObligations, keepOnlySpecifiedTransitions) where
 
   import Data.List
   import Numeric.Natural
@@ -16,12 +22,21 @@ module StaticAnalysis.ComplianceCheckingWithAssertions (SyncComp(..), Config, Sy
   import StaticAnalysis.SMTInstrumentation
 
 
-  --take out general flow to StaticAnalysis.hs, here leave compliance checking specific analysis
+  --TODO take out general flow to StaticAnalysis.hs, here leave compliance checking specific analysis
   type AbstractState = ([Z3Construct], SSAContext)
+  emptyAbstractState = ([],[])
+
 
   type Config = (CFG.State, DEA.State, AbstractState)
   type EventSeq = [DEA.Event]
-  type SyncTransition = (Config, EventSeq, Config)
+  type PreCondition = [Z3Construct]
+  type ProofObligation = [Z3Construct]
+  data SyncTransition = SyncTransition{
+                                  csrc :: Config,
+                                  evseq :: EventSeq,
+                                  pre :: PreCondition,
+                                  cdst :: Config
+                              } deriving (Eq, Ord, Show)
   --data SyncTransition = SyncTransition{
     --                            csrc:: Config,
       --                          cevent :: EventSeq,
@@ -30,6 +45,7 @@ module StaticAnalysis.ComplianceCheckingWithAssertions (SyncComp(..), Config, Sy
             --                } deriving (Eq, Ord, Show)
 
   data SyncComp = SyncComp{
+                    functName :: FunctionSignature,
                     first :: [Config],
                     configurations :: [Config],
                     evolution :: [SyncTransition],
@@ -42,10 +58,16 @@ module StaticAnalysis.ComplianceCheckingWithAssertions (SyncComp(..), Config, Sy
                   summary :: [(IFunctionCFG, Natural, DEA.State, [(DEA.State, EventSeq)])]
             } deriving (Eq, Ord, Show)
 
-  compliantWith :: Natural -> ICFG -> DEA -> ICallGraph -> Bool
-  compliantWith level (ICFG ifuncs) dea cg = let (deaStateAfterExec, _) = exhaustiveFunctionExec level (ICFG ifuncs) dea ([], initialStates dea) cg (Cache [])
-                                                 badStatesReached = [b | b <- intersect deaStateAfterExec (badStates dea)]
-                                            in null badStatesReached
+
+  compliantWith :: Natural -> ICFG -> DEA.ContractSpecification -> ICallGraph -> Bool
+  compliantWith level icfg contractSpec cg = not $ elem False (map f (DEA.daes contractSpec))
+                                                      where f dea = compliantWithDEA level icfg dea cg
+
+
+  compliantWithDEA :: Natural -> ICFG -> DEA -> ICallGraph -> Bool
+  compliantWithDEA level (ICFG ifuncs) dea cg = let (deaStateAfterExec, _) = exhaustiveFunctionExec level (ICFG ifuncs) dea ([], initialStates dea) cg (Cache [])
+                                                    badStatesReached = [b | b <- intersect deaStateAfterExec (badStates dea)]
+                                                  in null badStatesReached
 
 
   exhaustiveFunctionExec :: Natural -> ICFG -> DEA -> ([DEA.State], [DEA.State]) -> ICallGraph -> Cache -> ([DEA.State], Cache)
@@ -67,7 +89,7 @@ module StaticAnalysis.ComplianceCheckingWithAssertions (SyncComp(..), Config, Sy
   testFunctionFlowAnalysis :: Natural -> ICFG -> SolidityCode -> DEA -> [SyncComp]
   testFunctionFlowAnalysis level (ICFG (ifuncs)) solidityCode dea = let (ssaContext, assertrules) = scDecs solidityCode
                                                                         ssaContextWithSystemVars = systemDecs ++ ssaContext
-                                                                        (syncComps, cache) = testFunctionFlowAnalysisWithCache level ifuncs  (ICFG (ifuncs)) dea (icallgraph (ICFG (ifuncs))) (trace ("HYGTFssa: " ++ (show ssaContextWithSystemVars)) ssaContextWithSystemVars) [] (Cache [])
+                                                                        (syncComps, cache) = testFunctionFlowAnalysisWithCache level ifuncs  (ICFG (ifuncs)) dea (icallgraph (ICFG (ifuncs))) ssaContextWithSystemVars [] (Cache [])
                                                                       in syncComps
 
 
@@ -77,11 +99,14 @@ module StaticAnalysis.ComplianceCheckingWithAssertions (SyncComp(..), Config, Sy
   testFunctionFlowAnalysisWithCache level (ifunc:ifuncss) (ICFG (ifuncs)) dea cg ssaContext runningResult cache = let ifuncSSAContext = (parameterListDec [] ssaContext (parameters (isignature ifunc))) ++ (parameterListDec [] ssaContext (returnParams (isignature ifunc)))
                                                                                                                       newSSAContext = case trace ("ssacontext: " ++ show (ssaContext ++ ifuncSSAContext)) (ssaContext ++ ifuncSSAContext) of
                                                                                                                                                   _ -> ssaContext ++ ifuncSSAContext
+                                                                                                                      --TODO we are starting initial configs at any state in the DEA, simulating the behaviour outside a method
+                                                                                                                      initialConfigs = [(iinitial ifunc, deaState, ([], newSSAContext)) | deaState <- allStates dea]
                                                                                                                       syncComp = SyncComp{
-                                                                                                                              first = [(iinitial ifunc, deaState, ([], newSSAContext)) | deaState <- initialStates dea],
-                                                                                                                              configurations = [(iinitial ifunc, deaState, ([], newSSAContext)) | deaState <- initialStates dea],
+                                                                                                                              functName = isignature ifunc,
+                                                                                                                              first = initialConfigs,
+                                                                                                                              configurations = initialConfigs,
                                                                                                                               evolution = [],
-                                                                                                                              transClosureFromFirst = [((iinitial ifunc, deaState, ([], newSSAContext)), []) | deaState <- initialStates dea]
+                                                                                                                              transClosureFromFirst = [((iinitial ifunc, deaState, ([], newSSAContext)), []) | deaState <- allStates dea]
                                                                                                                             }
                                                                                                                       (syncCompp, newCache) = exhaustiveSteps level (ifunc, (ICFG (ifuncs))) dea (first syncComp) syncComp cg cache
                                                                                                                     in testFunctionFlowAnalysisWithCache level (ifuncss) (ICFG (ifuncs)) dea cg ssaContext ([syncCompp] ++ runningResult) newCache
@@ -91,6 +116,7 @@ module StaticAnalysis.ComplianceCheckingWithAssertions (SyncComp(..), Config, Sy
 --TODO add SSAContext logic
   functionFlowAnalysis :: Natural -> (IFunctionCFG, ICFG) -> DEA -> [Config] -> ICallGraph -> Cache -> (SyncComp, Cache)
   functionFlowAnalysis level (ifunc, icfg) dea configs cg cache = let syncComp = SyncComp{
+                                                                                  functName = isignature ifunc,
                                                                                   first = configs,
                                                                                   configurations = configs,
                                                                                   evolution = [],
@@ -102,16 +128,17 @@ module StaticAnalysis.ComplianceCheckingWithAssertions (SyncComp(..), Config, Sy
   exhaustiveSteps :: Natural -> (IFunctionCFG, ICFG) -> DEA -> [Config] -> SyncComp -> ICallGraph -> Cache -> (SyncComp, Cache)
   exhaustiveSteps level (ifunc, icfg) dea [] syncComp cg cache = (syncComp, cache)
   exhaustiveSteps level (ifunc, icfg) dea configs syncComp cg cache = let (nextTransitions, newCache) = oneStep level (ifunc, icfg) dea configs syncComp cg [] cache-- this should always be not in synccomp, since we are only exploring unexplored configs, see below
-                                                                          nextConfigsReduced = (nub ([cc | (c,e,cc) <- nextTransitions, notElem cc (configurations syncComp)]))
+                                                                          nextConfigsReduced = (nub ([cc | SyncTransition c e _ cc <- nextTransitions, notElem cc (configurations syncComp)]))
                                                                           callStateConfigs = [(s,q, ass) | (s,q, ass) <- configs, isFunctionCallState s]
                                                                           forcedCallStateTransitions = [t | (s,q, ass) <- callStateConfigs, t <- oneSyntacticStep (ifunc, icfg) dea (s,q, ass)]
-                                                                          forcedNextConfigs = nub ([cc | (c,e,cc) <- forcedCallStateTransitions, notElem cc (configurations syncComp)])
+                                                                          forcedNextConfigs = nub ([cc | SyncTransition c e _ cc <- forcedCallStateTransitions, notElem cc (configurations syncComp)])
                                                                           updatedSyncComp = SyncComp{
+                                                                                          functName = isignature ifunc,
                                                                                           first = first syncComp,
                                                                                           configurations = forcedNextConfigs ++ nextConfigsReduced ++ configurations syncComp,
                                                                                           evolution = nub (forcedCallStateTransitions ++ nextTransitions ++ evolution syncComp),
                                                                                           transClosureFromFirst = nub (transClosureFromFirst syncComp
-                                                                                                                         ++ [(cc, ee ++ e) | (c,e,cc) <- (nextTransitions ++ forcedCallStateTransitions),
+                                                                                                                         ++ [(cc, ee ++ e) | SyncTransition c e _ cc <- (nextTransitions ++ forcedCallStateTransitions),
                                                                                                                                                (ccc, ee) <- transClosureFromFirst syncComp,
                                                                                                                                                 c == ccc]
                                                                                                                           )
@@ -126,7 +153,7 @@ module StaticAnalysis.ComplianceCheckingWithAssertions (SyncComp(..), Config, Sy
   --showStateLabel (st, State l, ass) = "(" ++ show st ++ ", " ++ l ++ ", " ++ foldr (++) "" (map display ass) ++ ")"
 
  --returns the one-step transitions to add to the composition
-  oneStep ::  Natural -> (IFunctionCFG, ICFG) -> DEA -> [Config] -> SyncComp -> ICallGraph -> [(Config, EventSeq, Config)] -> Cache -> ([(Config, EventSeq, Config)], Cache)
+  oneStep ::  Natural -> (IFunctionCFG, ICFG) -> DEA -> [Config] -> SyncComp -> ICallGraph -> [SyncTransition] -> Cache -> ([SyncTransition], Cache)
 --  oneStep (ThrowState, _, _) _ _ _ a = ([], a)
   oneStep _ _ _ [] _ _ runningResult cache = (runningResult, cache)
 
@@ -135,14 +162,14 @@ module StaticAnalysis.ComplianceCheckingWithAssertions (SyncComp(..), Config, Sy
   oneStep level (ifunc, icfg) dea ((FunctionCallState l (OutsideFunctionCall e (Identifier "delegatecall") p), deaState, ass):configs) syncComp cg runningResult cache
                    = let prevState = (FunctionCallState l (OutsideFunctionCall e (Identifier "delegatecall") p), deaState, ass)
                          eventSeqs = [[e] | e <- getEventsFromDEA dea]
-                         newTransitions = [(prevState, [e], (fst3 prevState, newDEAState, ([],[]))) | [e] <- eventSeqs, newDEAState <- transitionDEAWithEvent dea deaState (DEAEvent e)]
+                         newTransitions = [SyncTransition prevState [e] [] (fst3 prevState, newDEAState, ([],[])) | [e] <- eventSeqs, newDEAState <- transitionDEAWithEvent dea deaState (DEAEvent e)]
                         in oneStep level (ifunc, icfg) dea configs syncComp cg (newTransitions ++ runningResult) cache
                        --in trace "66" (newTransitions ++ transitions, newCache)
 
   oneStep 0 (ifunc, icfg) dea ((FunctionCallState l (OutsideFunctionCall e name p), deaState, ass):configs) syncComp cg runningResult cache =
                      let prevState = (FunctionCallState l (OutsideFunctionCall e name p), deaState, ass)
                          eventSeqs = [[e] | e <- getEventsFromDEA dea]
-                         newTransitions = [(prevState, [e], (fst3 prevState, newDEAState, ([],[]))) | [e] <- eventSeqs, newDEAState <- transitionDEAWithEvent dea deaState (DEAEvent e)]
+                         newTransitions = [SyncTransition prevState [e] [] (fst3 prevState, newDEAState, ([],[])) | [e] <- eventSeqs, newDEAState <- transitionDEAWithEvent dea deaState (DEAEvent e)]
                       in oneStep 0 (ifunc, icfg) dea configs syncComp cg (newTransitions ++ runningResult) cache
                     --   in trace "77" (newTransitions ++ transitions, newCache)
 
@@ -153,14 +180,14 @@ module StaticAnalysis.ComplianceCheckingWithAssertions (SyncComp(..), Config, Sy
                                                       --  let callSyncComp = (functionFlowAnalysis (level - 1) (ifuncc, ICFG ifuncs) dea [(iinitial ifuncc, deaState)] cg cache),
                                                         --    ((endState, deaState), es) <- transClosureFromFirst callSyncComp,
                                                           --    elem endState (iend ifuncc)]
-                         newTransitions = [(prevState, eventSeq, (fst3 prevState, newDEAState, ([],[]))) | (newDEAState, eventSeq) <- endDEAStateEventSeqPairs]
+                         newTransitions = [SyncTransition prevState eventSeq [] (fst3 prevState, newDEAState, ([],[])) | (newDEAState, eventSeq) <- endDEAStateEventSeqPairs]
                        in oneStep level (ifunc, ICFG ifuncs) dea configs syncComp cg (newTransitions ++ runningResult) newCache
                       -- in trace "88" (newTransitions ++ transitions, newerCache)
 
   oneStep 0 (ifunc, icfg) dea ((FunctionCallState l (CFG.FunctionCall name params), deaState, ass):configs) syncComp cg runningResult cache =
                      let prevState = (FunctionCallState l (CFG.FunctionCall name params), deaState, ass)
                          events = getEventsAssociatedWithIFunctionCFG ifunc icfg dea cg
-                         newTransitions = [(prevState, [e], (fst3 prevState, newDEAState, ([],[]))) | e <- events, newDEAState <- transitionDEAWithEvent dea deaState (DEAEvent e)]
+                         newTransitions = [SyncTransition prevState [e] [] (fst3 prevState, newDEAState, ([],[])) | e <- events, newDEAState <- transitionDEAWithEvent dea deaState (DEAEvent e)]
                        in oneStep 0 (ifunc, icfg) dea configs syncComp cg (newTransitions ++ runningResult) cache
                        --in trace "99" (newTransitions ++ transitions, newCache)
 
@@ -174,7 +201,7 @@ module StaticAnalysis.ComplianceCheckingWithAssertions (SyncComp(..), Config, Sy
                                                                 let callSyncComp = functionFlowAnalysis (level - 1) (ifuncc, ICFG ifuncs) dea [(iinitial ifuncc, deaState, ([],[]) {- should be as?-})] cg,
                                                                         ((endState, deaState, _), eventSeq) <- transClosureFromFirst syncComp,
                                                                         elem endState (iend ifuncc)]
-                                                    newTransitions = [(prevState, eventSeq, (fst3 prevState, newDEAState, ([], []))) | (newDEAState, eventSeq) <- endDEAStateEventSeqPairs]
+                                                    newTransitions = [SyncTransition prevState eventSeq [] (fst3 prevState, newDEAState, ([], [])) | (newDEAState, eventSeq) <- endDEAStateEventSeqPairs]
                                                   in oneStep level (ifunc, ICFG ifuncs) dea configs syncComp cg (newTransitions ++ runningResult) cache
                        --in trace "1010" (newTransitions ++ transitions, newCache)
 
@@ -186,23 +213,61 @@ module StaticAnalysis.ComplianceCheckingWithAssertions (SyncComp(..), Config, Sy
                                                                                                     in oneStep level (ifunc, icfg) dea configs syncComp cg (syntacticSteps ++ runningResult) cache
                                                                                   --    in  trace ("here3" ++ (show $ summary cache)) (syntacticSteps, cache)
 
-  oneSyntacticStep :: (IFunctionCFG, ICFG) -> DEA -> Config -> [(Config, EventSeq, Config)]
-  oneSyntacticStep (ifunc, icfg) dea (scState, deaState, ass) = let outgoingTransitions = [t | t <- itransitions ifunc, isrc t == scState]
-                                                                    newTransitions =
-                                                                                    [((scState, deaState, ass), [], (idst t, deaState, updatedWithProgramTransiton)) | t <- outgoingTransitions, ievent t == Epsilon, let updatedWithProgramTransiton = trace ("no event transitions: " ++ show t ++ "\n\n\n\n" ++ (show $ updateAbstractStateWithTransition ass t) ++ "\n\n\n\n\n\n\n\n\n\n\n\n") updateAbstractStateWithTransition ass t]
-                                                                                    ++ [((scState, deaState, ass),
-                                                                                                        toEventSeq (ievent t),
-                                                                                                          (idst t, nextDEAState, updatedWithProgramTransiton))
+  oneSyntacticStep :: (IFunctionCFG, ICFG) -> DEA -> Config -> [SyncTransition]
+  oneSyntacticStep (ifunc, icfg) dea (scState, deaState, (ass, ssa)) = let outgoingTransitions = [t | t <- itransitions ifunc, isrc t == scState]
+                                                                           newTransitions =
+                                                                                    [(SyncTransition (scState, deaState, (ass, ssa)) [] [] (idst t, deaState, updatedWithProgramTransiton))
+                                                                                                                    | t <- outgoingTransitions, ievent t == Epsilon,
+                                                                                                                      let updatedWithProgramTransiton = updateAbstractStateWithTransition (ass, ssa) t]
+                                                                                    ++ [(SyncTransition (scState, deaState, (ass, ssa)) (toEventSeq (ievent t)) (condToZ3 cond ssa) (idst t, nextDEAState, addConditionsToAbstractState (condToZ3 cond ssa) (joinAbstractStates (actToZ3 act ssa) updatedWithProgramTransiton)))
                                                                                                           | t <- outgoingTransitions, ievent t /= Epsilon,
                                                                                                                 let nextDEATransitions = [tt | tt <- DEA.transitions dea, (DEAEvent (DEA.event (DEA.label tt))) == (ievent t)],
-                                                                                                                (nextDEAState, _, _) <- transitionDEAWithEventWithGCL dea deaState (ievent t),
+                                                                                                                (nextDEAState, cond, act) <- transitionDEAWithEventWithGCL dea deaState (ievent t),
                                                                                                                 --TODO define below function in Util
                                                                                                             --    (nextDEAState, guard, action) <- transitionDEAWithEventWithGCL dea deaState (ievent t),
-                                                                                                                let updatedWithProgramTransiton = trace ("event transitions: " ++ show t ++ "\n\n\n\n") (updateAbstractStateWithTransition ass t)
+                                                                                                                let updatedWithProgramTransiton = (updateAbstractStateWithTransition (ass, ssa) t)
                                                                                                                 --TODO below
                                                                                                             --    let updatedwithDEATransiton = updateAbstractStateWithDEATransition updatedWithProgramTransiton (nextDEAState, guard, action)
                                                                                                                 ]
                                                                  in newTransitions
+
+  joinAbstractStates :: AbstractState -> AbstractState -> AbstractState
+  joinAbstractStates (ass,ssa) (asss, sssa) = (ass ++ asss, nub (ssa ++ sssa))
+
+  addConditionsToAbstractState :: [Z3Construct] -> AbstractState -> AbstractState
+  addConditionsToAbstractState ass (asss, ssa) = (ass ++ asss, ssa)
+
+
+  data ProofObligationMap = ProofObligationMap [(SyncTransition, ProofObligation)] deriving (Eq, Ord, Show)
+
+  getProofObligations :: SyncComp -> ProofObligationMap
+  getProofObligations syncComp = ProofObligationMap ([(t, conds) | t <- evolution syncComp,
+                                                                  let conds = proofObligationOfTransition syncComp t,
+                                                                  not $ null [ass | Z3Assert ass <- conds]]--, not (null (pre t))]
+                                                          ++ [(t, [Z3Assert $ Assert $ Rel $ CBase $ BoolVal "true"]) | t <- evolution syncComp,
+                                                                          let conds = proofObligationOfTransition syncComp t,
+                                                                          null [ass | Z3Assert ass <- conds]])
+
+  proofObligationOfTransition :: SyncComp -> SyncTransition -> ProofObligation
+  proofObligationOfTransition syncComp (SyncTransition (_, _, (stateCond, stateSSA)) _ (preConds) _) = nub ([Z3Dec dec | dec <- varDecsFromSSAContext stateSSA]
+                                                                                                    ++ stateCond ++ preConds)
+
+
+  varDecsFromSSAContext :: SSAContext -> [VarDeclaration]
+  varDecsFromSSAContext ssaContext = [Dec (s ++ (show n)) t | (Dec s t, nn) <- ssaContext, n <- [0..nn]]
+
+
+  condToZ3 :: Maybe Expression -> SSAContext -> [Z3Construct]
+  condToZ3 Nothing _ = []
+  condToZ3 (Just expr) ssaContext = case exprRel [] ssaContext expr of
+                                      (_, Nothing, _) ->  []
+                                      (_, Just assertRel, _) -> [Z3Assert $ Assert assertRel]
+
+  actToZ3 :: Maybe Statement -> SSAContext -> AbstractState
+  actToZ3 Nothing _ = emptyAbstractState
+  actToZ3 (Just stmt) ssaContext = case statementRel [] ssaContext stmt of
+                                        (_, Nothing, _) -> emptyAbstractState
+                                        (varDecs, Just assertRel, newSSAContext) -> ([Z3Assert $ Assert assertRel], newSSAContext)
 
 --  oneSyntacticStepInductive :: IFunctionCFG -> DEA -> Config -> [DEA.Transition] -> [(Config, EventSeq, Config)]
 --  oneSyntacticStepInductive ifunc dea (scState, deaState, ass) [] = let outgoingICFGTransitions = [t | t <- itransitions ifunc, isrc t == scState]
@@ -250,9 +315,9 @@ module StaticAnalysis.ComplianceCheckingWithAssertions (SyncComp(..), Config, Sy
                                                                                                                             in updateAbstractStateWithExpression withStmt (Unary "!" expr)
 
 
-  updateAbstractStateWithTransition absState (ITransition (StatementState _ stmt) _ FF _) = case trace "lokilo8u" absState of
+  updateAbstractStateWithTransition absState (ITransition (StatementState _ stmt) _ FF _) = case absState of
                                                                                                 _ -> absState
-  updateAbstractStateWithTransition absState (ITransition (StatementState _ stmt) _ _ _) = case trace "gfsdgf" (updateAbstractStateWithStatement absState stmt) of
+  updateAbstractStateWithTransition absState (ITransition (StatementState _ stmt) _ _ _) = case (updateAbstractStateWithStatement absState stmt) of
                                                                                                                       _ -> updateAbstractStateWithStatement absState stmt
   updateAbstractStateWithTransition absState (_) = absState
 
@@ -280,9 +345,9 @@ module StaticAnalysis.ComplianceCheckingWithAssertions (SyncComp(..), Config, Sy
 
   updateAbstractStateWithExpression :: AbstractState -> Expression -> AbstractState
   updateAbstractStateWithExpression (z3Constructs, ssaContext) expr = case exprRel [] ssaContext expr of --TODO no assertions being added because ssaContext is empty, it should have variable declarationsm, I think
-                                                                                  (_, Nothing, newSSAContext) -> trace ("updatewithexpr: Nothing " ++ (show expr) ++ "___" ++ (show ssaContext)) (z3Constructs, newSSAContext)
+                                                                                --  (_, Nothing, newSSAContext) -> trace ("updatewithexpr: Nothing " ++ (show expr) ++ "___" ++ (show ssaContext)) (z3Constructs, newSSAContext)
                                                                                   (_, Just assertRel, newSSAContext) -> trace ("updatewithexpr:  " ++ (show assertRel)) ([Z3Assert $ Assert assertRel] ++ z3Constructs, newSSAContext)
-                                                                                  v -> trace ("updatewithexpr: " ++ show v) (z3Constructs, ssaContext)
+                                                                                  v -> (z3Constructs, ssaContext)
 
   fst3 :: (a,b,c) -> a
   fst3 (aa, _, _) = aa
@@ -304,3 +369,34 @@ module StaticAnalysis.ComplianceCheckingWithAssertions (SyncComp(..), Config, Sy
   getEventsAssociatedWithIFunctionCFG ifunc icfg dea callGraph = if eventuallyDelegates callGraph ifunc
                                                                     then [e | e <- getEventsFromDEA dea]
                                                                     else [e | ifunc <- getCalleesOf callGraph ifunc, t <- itransitions ifunc, e <- getEventsFromDEA dea, ievent t == DEAEvent e]
+
+
+
+
+
+
+  --extractProofObligations :: SyncComp -> [(SyncTransition, [Z3Construct])
+  --extractProofObligations syncComp = [(t, toCheck) | (c,es,cond,act,_ cc) <- evolutions syncComp, t <- let toCheck = []]
+
+  reduceForReachability :: SyncComp -> SyncComp
+  reduceForReachability syncComp = let statesWithNoSource = [c | c <- configurations syncComp, not $ elem c (first syncComp), null [t | t <- evolution syncComp, csrc t == c]]
+                                    in if null statesWithNoSource
+                                        then syncComp
+                                        else SyncComp{
+                                                functName = functName syncComp,
+                                                first = first syncComp,
+                                                configurations = (configurations syncComp) \\ statesWithNoSource,
+                                                evolution = [t | t <- evolution syncComp, not $ elem (csrc t) statesWithNoSource],
+                                                --this gives shortest transitive closure, i.e. loops aren't resolved infinitely but only once
+                                                transClosureFromFirst = [(c,e) | (c,e) <- transClosureFromFirst syncComp, not $ elem c statesWithNoSource]
+                                              }
+
+  keepOnlySpecifiedTransitions :: SyncComp -> [SyncTransition] -> SyncComp
+  keepOnlySpecifiedTransitions syncComp toKeep = reduceForReachability SyncComp{
+                                                                        functName = functName syncComp,
+                                                                        first = first syncComp,
+                                                                        configurations = configurations syncComp,
+                                                                        evolution = intersect toKeep (evolution syncComp),
+                                                                        --this gives shortest transitive closure, i.e. loops aren't resolved infinitely but only once
+                                                                        transClosureFromFirst = transClosureFromFirst syncComp
+                                                                      }

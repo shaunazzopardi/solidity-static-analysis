@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 module DEA.Parsing (
-  module Parseable, module DEA.DEA
+  module Parseable
 ) where
 
 import Data.List
@@ -218,4 +218,3 @@ instance Parseable FunctionCall where
       return (FunctionCall { functionName = fn, parametersPassed = maybe_el })
 
   display fc = display (functionName fc) ++ maybe "" display (parametersPassed fc)
-
