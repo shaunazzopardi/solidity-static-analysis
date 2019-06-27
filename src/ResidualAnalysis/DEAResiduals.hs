@@ -1,11 +1,10 @@
-module StaticAnalysis.DEAResiduals where
+module ResidualAnalysis.DEAResiduals where
 
   import qualified DEA.DEA as DEA
   import qualified CFG.CFG as CFG
-  import qualified StaticAnalysis.ICFG as ICFG
-  import qualified StaticAnalysis.Util
   import Solidity.Solidity
   import Data.List
+  import Debug.Trace
 
 
 
@@ -54,11 +53,10 @@ module StaticAnalysis.DEAResiduals where
   usesEvent ((DEA.Transition q _ (DEA.GCL e _ _)):rest) q' e' = (q == q' && e == e') || (usesEvent (rest) q e)
 
   reachibilityReduction :: DEA.DEA -> DEA.DEA
-  reachibilityReduction dea = let statesReachableFromInitialState = statesAfter dea (DEA.initialStates dea)
-                                  badAfterStates = [state | state <- statesReachableFromInitialState, badAfter dea state]
-                                  goodEntryPointStates = [state | state <- statesReachableFromInitialState, goodEntryPoint dea state]
+  reachibilityReduction dea = let badAfterStates = [state | state <- DEA.allStates dea, badAfter dea state]
+                                  goodEntryPointStates = [state | state <- DEA.allStates dea, goodEntryPoint dea state]
                                   usefulStates = badAfterStates ++ goodEntryPointStates
-                                  uselessStates = DEA.allStates dea \\ usefulStates
+                                  uselessStates = (DEA.allStates dea \\ usefulStates)
                                   usefulTransitions = [transition | transition <- DEA.transitions dea, elem (DEA.src transition) usefulStates, elem (DEA.dst transition) usefulStates]
                                   in DEA.DEA{
                                     DEA.daeName = DEA.daeName dea,
@@ -70,23 +68,23 @@ module StaticAnalysis.DEAResiduals where
                                   }
 
   badAfter :: DEA.DEA -> DEA.State -> Bool
-  badAfter dea state = (pathBetween dea (head (DEA.initialStates dea)) state) && ((statesAfter dea [state]) \\ (DEA.badStates dea) /= [])
+  badAfter dea state = (elem state (statesAfter dea (DEA.initialStates dea)))  && ([b | b <- (DEA.badStates dea), elem b (statesAfter dea [state])] /= [])
 
   goodEntryPoint :: DEA.DEA -> DEA.State -> Bool
-  goodEntryPoint dea state = (pathBetween dea (head (DEA.initialStates dea)) state
-                                  && elem state (DEA.acceptanceStates dea))
-                              || (not (badAfter dea state)
-                                  && [src | DEA.Transition src state _ <- DEA.transitions dea, badAfter dea state] /= [])
+  goodEntryPoint dea state = (elem state (statesAfter dea (DEA.initialStates dea)))
+                                  && (elem state (DEA.acceptanceStates dea)
+                                        || (not (badAfter dea state)
+                                            && [DEA.src t | t <- DEA.transitions dea, badAfter dea (DEA.src t)] /= []))
 
   pathBetween :: DEA.DEA -> DEA.State -> DEA.State -> Bool
-  pathBetween dea q q' = elem q (statesAfter dea [q])
+  pathBetween dea q qq = elem qq (statesAfter dea [q])
 
   statesAfter :: DEA.DEA -> [DEA.State] -> [DEA.State]
   statesAfter dea [] = []
   statesAfter dea states = let afterOneStep = nub $ ((oneStep dea states) ++ states)
-                               in if(afterOneStep \\ (nub $ states) /= [])
+                               in if(afterOneStep \\ states /= [])
                                       then statesAfter dea afterOneStep
                                       else afterOneStep
 
   oneStep :: DEA.DEA -> [DEA.State] -> [DEA.State]
-  oneStep dea states = [dst | src <- states, DEA.Transition src dst _ <- DEA.transitions dea]
+  oneStep dea states = [DEA.dst t | s <- states, t <- DEA.transitions dea, DEA.src t == s]

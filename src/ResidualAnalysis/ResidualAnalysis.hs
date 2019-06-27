@@ -60,7 +60,7 @@ module ResidualAnalysis.ResidualAnalysis where
   guardAlwaysTrue' :: AMS -> DEA.Transition -> Bool
   guardAlwaysTrue' ams qt = let matches = [ev | ev <- evolutions ams, deaTrans ev == Just qt, (cfaTrans ev) /= Nothing]
                                 statesFromWhichQTIsNotTheOnlyPossibility = [(AMS.from ev, (outgoingAMSTransitions ams (AMS.from ev) (DEA.event $ label qt))) | ev <- matches, (length (outgoingAMSTransitions ams (AMS.from ev) (DEA.event $ label qt))) > 1]
-                            in trace (display qt ++ "__" ++ (show statesFromWhichQTIsNotTheOnlyPossibility)) (statesFromWhichQTIsNotTheOnlyPossibility == [])
+                            in (statesFromWhichQTIsNotTheOnlyPossibility == [])
 
   outgoingAMSTransitions :: AMS -> AMSConfig -> DEA.Event -> [AMSTransition]
   outgoingAMSTransitions ams c event = [ev | ev <- evolutions ams, AMS.from ev == c, usesEvent ev event]

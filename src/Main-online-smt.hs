@@ -70,7 +70,7 @@ main =
           acfas = map (\cfa -> abstract cfa (getEventsFromDEA dea)) outCFAs
           acfaText = (foldr (++) "" (map display (acfas)))
           amssText = (foldr (++) "" (map display amss))
-          residualDEA = bothResiduals amss dea
+          residualDEA = reachibilityReduction $ bothResiduals amss dea
       writeFile outFile cfaText
         `failWith` ("Cannot write to CFA file <"++outFile++">")
       putStrLn ("Created residual CFA file <"++outFile++">")

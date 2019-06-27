@@ -14,6 +14,7 @@ module SMT.SMTLib2 where
   import Text.Parsec.String
   import Data.Char hiding (DecimalNumber)
   import Data.List
+  import Debug.Trace
 
   import Parseable
   import Solidity.Solidity
@@ -32,6 +33,7 @@ module SMT.SMTLib2 where
 --------------------------------------------------------------------------------
 
   data BoolVal = BoolVal String
+                | BoolValRel GenericRelation
                 | BoolVar String deriving (Eq, Ord, Show)
 -----------------
   --data GenericValues = Val String
@@ -44,17 +46,20 @@ module SMT.SMTLib2 where
 
   instance Parseable BoolVal where
     display (BoolVal b) = b
+    display (BoolValRel b) = display b
     display (BoolVar b) = b
 --------------------------------------------------------------------------------
   instance VarsOf BoolVal where
     varsOf (BoolVal b) = []
+    varsOf (BoolValRel b) = varsOf b
     varsOf (BoolVar b) = [b]
 --------------------------------------------------------------------------------
 
 --------------------------------------------------------------------------------
   --we should also allow HexVal
 
-  data NumVal = IntVal String
+  data NumVal = NumValRel GenericRelation
+              | IntVal String
               | RealVal String
               | IntVar String
               | RealVar String deriving (Eq, Ord, Show)
@@ -63,12 +68,14 @@ module SMT.SMTLib2 where
 
   instance Parseable NumVal where
   --  parser = --whitespace *> (SolidityCode <$> parser) <* whitespace <* eof
+    display (NumValRel i) = display i
     display (IntVal i) = i
     display (RealVal d) = d
     display (IntVar v) = v
     display (RealVar v) = v
 --------------------------------------------------------------------------------
   instance VarsOf NumVal where
+    varsOf (NumValRel i) = varsOf i
     varsOf (IntVal i) = []
     varsOf (RealVal d) = []
     varsOf (IntVar v) = [v]
@@ -396,6 +403,8 @@ module SMT.SMTLib2 where
 -------------
   instance Parseable Assert where
     display (Assert rel) = "(assert " ++ display rel ++ ")"
+  instance VarsOf Assert where
+    varsOf (Assert rel) = varsOf rel
 --------------------------------------------------------------------------------
 
   data Z3Construct = Z3Sort SortDeclaration | Z3Dec VarDeclaration | Z3Assert Assert deriving (Eq, Ord, Show)
