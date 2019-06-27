@@ -2,14 +2,14 @@
 WIP Static analysis for Solidity, based on https://github.com/shaunazzopardi/solidity-cfg-builder and https://github.com/gordonpace/contractlarva.
 
 
-## Static Analysis with Residual/Quotient Analysis
+# Static Analysis with Residual/Quotient Analysis
 
 We use a control-flow graph representation of a Solidity smart contract in an attempt to prove properties of smart contracts statically by over-approximating the control-flow of a Solidity smart contract (based on [solidity-cfg-builder](https://github.com/shaunazzopardi/solidity-cfg-builder), and its variable state. 
 
 This is partially based on work presented in the proceedings of [PrePost 2017](http://staff.um.edu.mt/afra1/prepost17/), in the [EPCTS series](http://eptcs.web.cse.unsw.edu.au/content.cgi?PrePost17), and available on [arXiv](https://arxiv.org/abs/1708.07230).
 
 
-# Description of Analysis
+## Description of Analysis
 
 1. Each smart contract function is represented as a *control-flow automaton* (CFA) with transitions tagged with a triple containing: (i) a condition on the program variable state; (ii) a statement which transforms the program variable state; and (iii) a property event activated upon the statement's execution.
 
@@ -33,14 +33,14 @@ This is partially based on work presented in the proceedings of [PrePost 2017](h
 
 
 
-# Limitations
+## Limitations
 
 1. We are not dealing function modifiers, and smart contract inheritance (inline everything to enable analysis);
 2. DEA script not fully supported. A file only containing the "DEA ...." part of the script should be included;
 3. Reaching a call state removes every known assertion about the program state;
 4. v0.4.* Solidity code.
 
-# Requirements
+## Requirements
 
 1. (Required) [GHC](https://www.haskell.org/ghc/) (e.g. install the full [Haskell Platform](https://www.haskell.org/platform/));
 2. (Required) [z3](https://github.com/Z3Prover/z3);
