@@ -1,8 +1,7 @@
-# solidity-static-analysis
-WIP Static analysis for Solidity, based on https://github.com/shaunazzopardi/solidity-cfg-builder and https://github.com/gordonpace/contractlarva.
-
-
 # Static Analysis with Residual/Quotient Analysis
+
+WIP Static analysis for verification of Solidity smart contracts, based on https://github.com/shaunazzopardi/solidity-cfg-builder and https://github.com/gordonpace/contractlarva.
+
 
 We use a control-flow graph representation of a Solidity smart contract in an attempt to prove properties of smart contracts statically by over-approximating the control-flow of a Solidity smart contract (based on [solidity-cfg-builder](https://github.com/shaunazzopardi/solidity-cfg-builder), and its variable state. 
 
