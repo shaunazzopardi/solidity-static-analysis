@@ -107,8 +107,8 @@ module ResidualAnalysis.AbstractCFA where
   abstractForwardDFStep :: CFA -> CFA.State -> VariableAbstraction -> (VariableAbstraction, [CFA.State])
   abstractForwardDFStep cfa s va = let outTrans = (outgoingCFATransitions s cfa)
                                        reachedStates = [CFA.dst t | t <- outTrans]
-                                       callStatesAbs = [(CFA.dst t,[]) | t <- outTrans, elem (CFA.dst t) (callStatesOf $ calls cfa)]
-                                       nonCallStatesAbs = [(CFA.dst t, updateVA si (condition t) (stmt t)) | t <- outTrans, si <- (vabsOf va s), not $ elem (CFA.dst t) (callStatesOf $ calls cfa)]
+                                       callStatesAbs = [(CFA.dst t,[]) | t <- outTrans, (elem (CFA.dst t) (callStatesOf $ calls cfa)) || (elem (CFA.dst t) (CFA.end cfa))]
+                                       nonCallStatesAbs = [(CFA.dst t, updateVA si (condition t) (stmt t)) | t <- outTrans, si <- (vabsOf va s), not (elem (CFA.dst t) (callStatesOf $ calls cfa)) && not (elem (CFA.dst t) (CFA.end cfa))]
                                      in (va ++ callStatesAbs ++ nonCallStatesAbs, reachedStates)
 
   updateVA :: StateInvariant -> Z3Condition -> Z3Statement -> StateInvariant
