@@ -59,7 +59,7 @@ For correct results always make sure that the Solidity code compiles with a Soli
 
 To use the tool pass the location of the smart contract solidity file, the DEA property file, and the preferred location of the output to the executable, e.g. execute:
 
-> "./Main-online-smt" &lt;./examples/courierservice.sol&gt; &lt;./examples/courierservice.dea&gt; &lt;cfa.txt&gt; &lt;acfa.txt&gt; &lt;ams.txt&gt; &lt;residual.dea&gt;
+> "./Main-online-smt" "./examples/courierservice.sol" "./examples/courierservice.dea" "cfa.txt" "acfa.txt" "ams.txt" "residual.dea"
 
 ## License
 This project is licensed under the terms of the [Apache 2.0 license](LICENSE).
