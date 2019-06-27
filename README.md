@@ -41,8 +41,8 @@ This is partially based on work presented in the proceedings of [PrePost 2017](h
 
 ## Requirements
 
-1. (Required) [GHC](https://www.haskell.org/ghc/) (e.g. install the full [Haskell Platform](https://www.haskell.org/platform/));
-2. (Required) [z3](https://github.com/Z3Prover/z3);
+1. (Required) [GHC](https://www.haskell.org/ghc/) (to compile);
+2. (Required) [z3](https://github.com/Z3Prover/z3) (to prove assertions about the smart contract);
 3. (Optional) [graphviz](https://www.graphviz.org/) (to visualise CFAs, ACFAs, and AMSs).
 
 ## Building the tool
