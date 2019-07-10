@@ -34,9 +34,9 @@ This is partially based on work presented in the proceedings of [PrePost 2017](h
 
 ## Limitations
 
-1. We are not dealing function modifiers, and smart contract inheritance (inline everything to enable analysis);
+1. We are not dealing with function modifiers, and smart contract inheritance (inline everything to enable analysis);
 2. DEA script not fully supported:
-    - DEA variable state is not supported;
+    - DEA variable state is ignored (only conditions on program state considered in the analysis);
     - Only the "DEA ...." part of the script is supported;
 3. Reaching a call state removes every known assertion about the program state;
 4. v0.4.* Solidity code.
