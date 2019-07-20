@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleInstances, TypeSynonymInstances #-}
+
 module CFA.CFA where
 
   import Data.List
@@ -52,7 +54,7 @@ module CFA.CFA where
   } deriving (Eq, Ord, Show)
 --------
   instance Parseable Transition where
-  {-  parser = do src <- parser
+    parser = do src <- parser
                 spaces
                 string "->"
                 dst <- parser
@@ -64,11 +66,11 @@ module CFA.CFA where
                 char '='
                 spaces
                 char '"'
-                cond <- parser
+            --    cond <- parser TODO parse condition
                 spaces
                 string ">>"
                 spaces
-                act <- parser
+            --    act <- parser TODO parse action
                 spaces
                 string ">>"
                 spaces
@@ -79,7 +81,7 @@ module CFA.CFA where
                 spaces
                 char ';'
                 spaces
-                return (Transition (src) (dst) (cond) (act) (event))-}
+                return (Transition (src) (dst) [] [] (event))
     display (Transition src dst cond act event) = (display src) ++ " -> " ++ (display dst) ++ " [label = \"" ++ (foldr (++) "" $ map display cond) ++ " >> " ++ (foldr (++) "" $ map display act) ++ " >> " ++ (display event) ++ "\"];\n"
 -----------------
 -----------------
@@ -96,9 +98,7 @@ module CFA.CFA where
   } deriving (Eq, Ord, Show)
 --------
   instance Parseable CFA where
-{-    parser = do sortDecss <- many parser
-                varDecss <- many parser
-                string "digraph"
+    parser = do string "digraph"
                 spaces
                 char '"'
                 spaces
@@ -107,30 +107,70 @@ module CFA.CFA where
                 spaces
                 char '{'
                 spaces
-                string "initial"
-                spaces
-                string "->"
-                spaces
-                initialState <- parser
-                spaces
-                char ';'
-                spaces
-                endStates <- many (parser <* spaces <* string "->" <* spaces <* string "end" <* spaces <* char ';')
                 transitionList <- many parser
                 spaces
+                calls <- many $ do state <- many alphaNum
+                                   spaces
+                                   char '['
+                                   spaces
+                                   manyTill alphaNum (string "label=\"")
+                                   spaces
+                                   string "call:"
+                                   spaces
+                                   cfaReference <- many alphaNum
+                                   spaces
+                                   string "\""
+                                   spaces
+                                   string "];"
+                                   spaces
+                                   return (Call (State state) cfaReference)
+                           <||> do state <- many alphaNum
+                                   spaces
+                                   char '['
+                                   spaces
+                                   manyTill alphaNum (string "label=\"")
+                                   spaces
+                                   string "delegate call"
+                                   spaces
+                                   string "\""
+                                   spaces
+                                   string "];"
+                                   spaces
+                                   return (DelegateCall (State state))
+                           <||> do state <- many alphaNum
+                                   spaces
+                                   char '['
+                                   spaces
+                                   manyTill alphaNum (string "label=\"")
+                                   spaces
+                                   string "dynamic call"
+                                   spaces
+                                   string "\""
+                                   spaces
+                                   string "];"
+                                   spaces
+                                   return (DynamicCall (State state))
+                endStates <- many $ do state <- many alphaNum
+                                       spaces
+                                       char '['
+                                       spaces
+                                       manyTill alphaNum (string "];")
+                                       spaces
+                                       return (State state)
 --                try string "labelloc=\"t\";"
 --                string "label=\""
 --                spaces
 --                signat <- parser
 --                spaces
 --                string "\";"
---                spaces
                 char '}'
-                eof
-                return CFA{name = cfaName, sortDecs = sortDecss, varDecs = varDecss, transitions = transitionList, states = statesFromTransitions transitionList [], initial = initialState, end = endStates}-}
+                spaces
+                case initState transitionList of
+                    Nothing -> fail "no one initial state"
+                    Just s -> return CFA{name = cfaName, sortDecs = [], varDecs = [], transitions = transitionList, states = [src t | t <- transitionList] ++ [dst t | t <- transitionList], initial = s, end = endStates}
 
-    display cfa =   foldr (++) "" (map display (sortDecs cfa)) ++
-                    foldr (++) "" (map display (varDecs cfa)) ++ "\n\n" ++
+    display cfa =   "z3SortDeclarations: " ++ foldr (++) "" (map display (sortDecs cfa)) ++ "\n" ++
+                    "z3VarDeclarations: " ++ foldr (++) "" (map display (varDecs cfa)) ++ "\n\n" ++
                   "digraph \"" ++ display (name cfa) ++ "\"{\n" ++
                     foldr (++) "" (map display (transitions cfa)) ++
                     foldr (++) "" (nub [display s ++ "[style=filled, color=gray, label=\"call: " ++ name ++ "\"]" ++ ";\n" | (Call s name) <- calls cfa]) ++
@@ -140,6 +180,18 @@ module CFA.CFA where
                     ++ "\n}\n"
 -----------------
 -----------------
+  instance Parseable [CFA] where
+      parser = do cfas <- many parser
+                  eof
+                  return cfas
+
+
+  initState :: [Transition] -> Maybe State
+  initState (ts) = let states = [src t | t <- ts] ++ [dst t | t <- ts]
+                       initStates = states \\ [s | s <- states, t <- ts, dst t == s]
+                     in case initStates of
+                          (s:_) -> Just s
+                          _ -> Nothing
 
   emptyCFA :: CFA
   emptyCFA = CFA "" [] [] [] [State "0"] (State "0") [State "0"] []
