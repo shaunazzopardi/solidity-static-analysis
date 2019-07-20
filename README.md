@@ -1,6 +1,6 @@
 # Static Analysis with Residual/Quotient Analysis
 
-WIP Static analysis for verification of Solidity smart contracts, based on https://github.com/shaunazzopardi/solidity-cfg-builder and https://github.com/gordonpace/contractlarva.
+Static analysis for verification of Solidity smart contracts, based on https://github.com/shaunazzopardi/solidity-cfg-builder and https://github.com/gordonpace/contractlarva.
 
 
 We use a control-flow graph representation of a Solidity smart contract in an attempt to prove properties of smart contracts statically by over-approximating the control-flow of a Solidity smart contract (based on [solidity-cfg-builder](https://github.com/shaunazzopardi/solidity-cfg-builder), and its variable state. 
@@ -34,18 +34,18 @@ This is partially based on work presented in the proceedings of [PrePost 2017](h
 
 ## Limitations
 
-1. We are not dealing function modifiers, and smart contract inheritance (inline everything to enable analysis);
+1. We are not dealing with function modifiers, and smart contract inheritance (inline everything to enable analysis);
 2. DEA script not fully supported:
-    - DEA variable state is not supported;
-    - Only the "DEA ...." part of the script is supported;
+    - DEA variable state is ignored (only conditions on program state considered in the analysis);
+    - Only the "DEA <name>{...}" part of the script is supported;
 3. Reaching a call state removes every known assertion about the program state;
 4. v0.4.* Solidity code.
 
 ## Requirements
 
 1. (Required) [GHC](https://www.haskell.org/ghc/) (to compile);
-2. (Required) [z3](https://github.com/Z3Prover/z3) (to prove assertions about the smart contract);
-3. (Optional) [graphviz](https://www.graphviz.org/) (to visualise CFAs, ACFAs, and AMSs).
+2. (Required) [z3](https://github.com/Z3Prover/z3) executable in PATH (to prove assertions about the smart contract);
+3. (Optional) [graphviz](https://www.graphviz.org/) (to visualise CFAs, ACFAs, and AMSs), or use http://webgraphviz.com/.
 
 ## Building the tool
 
