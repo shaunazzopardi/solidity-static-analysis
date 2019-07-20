@@ -9,13 +9,13 @@ module ResidualAnalysis.ResidualAnalysis where
   import Data.List
   import Debug.Trace
 
-  bothResiduals :: [AMS] -> DEA -> DEA
+  bothResiduals :: (Eq a) => [AMS a] -> DEA -> DEA
   bothResiduals amss dea = guardResidual amss $ intraproceduralResidual amss dea
 
-  intraproceduralResidual :: [AMS] -> DEA -> DEA
+  intraproceduralResidual :: [AMS a] -> DEA -> DEA
   intraproceduralResidual amss dea = subDEA dea (nub $ justifyList $ intraproceduralResidual' amss)
 
-  intraproceduralResidual' :: [AMS] -> [Maybe DEA.Transition]
+  intraproceduralResidual' :: [AMS a] -> [Maybe DEA.Transition]
   intraproceduralResidual' [] = []
   intraproceduralResidual' (ams:amss) = [deaTrans ev | ev <- evolutions ams, (cfaTrans ev) /= Nothing] ++ (intraproceduralResidual' amss)
 
@@ -34,7 +34,7 @@ module ResidualAnalysis.ResidualAnalysis where
                     acceptanceStates = acceptanceStates dea
               }
 
-  guardResidual :: [AMS] -> DEA -> DEA
+  guardResidual :: (Eq a) => [AMS a] -> DEA -> DEA
   guardResidual amss dea =  DEA{
                               daeName = daeName dea,
                               allStates = allStates dea,
@@ -44,7 +44,7 @@ module ResidualAnalysis.ResidualAnalysis where
                               acceptanceStates = acceptanceStates dea
                             }
 
-  guardResidual' :: [AMS] -> [DEA.Transition] -> [DEA.Transition]
+  guardResidual' :: (Eq a) => [AMS a] -> [DEA.Transition] -> [DEA.Transition]
   guardResidual' [] _ = []
   guardResidual' _ [] = []
   guardResidual' amss (qt:qts) = let rest = guardResidual' amss qts
@@ -52,20 +52,20 @@ module ResidualAnalysis.ResidualAnalysis where
                                         then [DEA.Transition (DEA.src qt) (DEA.dst qt) (GCL (DEA.event $ label qt) Nothing (DEA.action $ label qt))] ++ rest
                                         else [qt] ++ rest
 
-  guardAlwaysTrue:: [AMS] -> DEA.Transition -> Bool
+  guardAlwaysTrue:: (Eq a) => [AMS a] -> DEA.Transition -> Bool
   -- guardAlwaysTrue [] _ = False
   guardAlwaysTrue (ams:[]) qt = (guardAlwaysTrue' ams qt)
   guardAlwaysTrue (ams:amss) qt = (guardAlwaysTrue' ams qt) && (guardAlwaysTrue amss qt)
 
-  guardAlwaysTrue' :: AMS -> DEA.Transition -> Bool
+  guardAlwaysTrue' :: (Eq a) => AMS a -> DEA.Transition -> Bool
   guardAlwaysTrue' ams qt = let matches = [ev | ev <- evolutions ams, deaTrans ev == Just qt, (cfaTrans ev) /= Nothing]
                                 statesFromWhichQTIsNotTheOnlyPossibility = [(AMS.from ev, (outgoingAMSTransitions ams (AMS.from ev) (DEA.event $ label qt))) | ev <- matches, (length (outgoingAMSTransitions ams (AMS.from ev) (DEA.event $ label qt))) > 1]
                             in (statesFromWhichQTIsNotTheOnlyPossibility == [])
 
-  outgoingAMSTransitions :: AMS -> AMSConfig -> DEA.Event -> [AMSTransition]
+  outgoingAMSTransitions :: (Eq a) => AMS a -> AMSConfig a -> DEA.Event -> [AMSTransition a]
   outgoingAMSTransitions ams c event = [ev | ev <- evolutions ams, AMS.from ev == c, usesEvent ev event]
 
-  usesEvent :: AMSTransition -> DEA.Event -> Bool
+  usesEvent :: AMSTransition a -> DEA.Event -> Bool
   usesEvent ev deaEvent = case cfaTrans ev of
                           Nothing -> False
                           Just trans -> CFA.event trans == DEAEvent deaEvent

@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances, TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleInstances, TypeSynonymInstances, MultiParamTypeClasses  #-}
 
 module ResidualAnalysis.IntraProceduralAbstractMonitoredSystem where
 
@@ -14,7 +14,8 @@ module ResidualAnalysis.IntraProceduralAbstractMonitoredSystem where
   import SMT.SolidityToSMTLib2
   import Parseable
 
-  type AMSConfig = (CFA.State, DEA.State, [[Z3Construct]])
+  --need to add ssacontext to config
+  type AMSConfig a = (CFA.State, DEA.State, a)
 
   instance Parseable [[Z3Construct]] where
       display [] = ""
@@ -25,18 +26,18 @@ module ResidualAnalysis.IntraProceduralAbstractMonitoredSystem where
   -- instance Eq AMSConfig where
   --   (==) (s,q,z3) (ss,qq,z33) = (s == ss) && (q == qq) && (z3 == z33)
 
-  instance Parseable AMSConfig where
-    display (s,q,vabs) = "(" ++ display s ++ ", " ++ display q ++ ", " ++  display vabs ++ ")"
+  instance Parseable a => Parseable (AMSConfig a) where
+    display (s,q,a) = "(" ++ display s ++ ", " ++ display q ++ ", " ++  display a ++ ")"
 
 
-  data AMSTransition = AMSTransition{
-                          from :: AMSConfig,
+  data AMSTransition a = AMSTransition{
+                          from :: AMSConfig a,
                           cfaTrans :: (Maybe CFA.Transition),
                           deaTrans :: (Maybe DEA.Transition),
-                          to :: AMSConfig
+                          to :: AMSConfig a
                         } deriving (Eq, Ord, Show)
 
-  instance Parseable AMSTransition where
+  instance Parseable a => Parseable (AMSTransition a) where
     display (AMSTransition fromConf cfaTrans deaTrans toConf) = let cfaTransString = case cfaTrans of
                                                                                         Nothing -> "#"
                                                                                         Just trans -> (foldr (++) "" $ map display (condition trans)) ++ " >> " ++ (foldr (++) "" $ map display (stmt trans)) ++ " >> " ++ (display (CFA.event trans))
@@ -45,7 +46,7 @@ module ResidualAnalysis.IntraProceduralAbstractMonitoredSystem where
                                                                                     Just trans -> display $ label trans
                                                                  in "\"" ++ display fromConf ++ "\"" ++ " -> " ++ "\"" ++ display toConf ++ "\"" ++ " [label = \"" ++ (display cfaTransString) ++ " || " ++ (display deaTransString) ++ "\"];\n"
 
-  transitionProofObligation :: [AMSTransition] -> AMSTransition -> [[Z3Construct]]
+  transitionProofObligation :: [AMSTransition [[Z3Construct]]] -> AMSTransition [[Z3Construct]] -> [[Z3Construct]]
   transitionProofObligation _ (AMSTransition (s,q,va) Nothing (Just deaTrans) to) = let deaCond = guard $ label deaTrans
                                                                                     in case deaCond of
                                                                                             Nothing -> []
@@ -72,30 +73,30 @@ module ResidualAnalysis.IntraProceduralAbstractMonitoredSystem where
                                                                                                             Just ass -> [v ++ [negatez3 (Z3Assert $ Assert ass)] | v <- updatedVA]
   transitionProofObligation _ _ = []
 
-  data AMS = AMS{
+  data AMS a = AMS{
                 cfaName :: String,
                 deaName :: String,
-                configs :: [AMSConfig],
-                evolutions :: [AMSTransition]
+                configs :: [AMSConfig a],
+                evolutions :: [AMSTransition a]
               } deriving (Eq, Ord, Show)
 
-  instance Parseable AMS where
+  instance Parseable a => Parseable (AMS a) where
     display (AMS cfaName deaName configs evols) =  "digraph \"" ++ (display cfaName ++ " || " ++ display deaName) ++ "\"{\n" ++
                                                 foldr (++) "" (map display (evols)) ++
                                                 "\n}\n"
 
-  type DataFlowLogic =  AbstractCFA -> DEA -> AMSConfig -> (Either CFA.Transition AbstractTransition) -> (Maybe DEA.Transition) -> AMSConfig
-  type DFL = DataFlowLogic
+  type DataFlowLogic a =  AbstractCFA -> DEA -> AMSConfig a -> (Either CFA.Transition AbstractTransition) -> (Maybe DEA.Transition) -> AMSConfig a
+  type DFL a = DataFlowLogic a
 
-  type InitConfigsDFL = AbstractCFA -> DEA -> [AMSConfig]
+  type InitConfigsDFL a = AbstractCFA -> DEA -> [AMSConfig a]
 
-  type DFLEnv = (InitConfigsDFL, DFL)
+  type DFLEnv a = (InitConfigsDFL a, DFL a)
 
-  initConfigsnoDF :: InitConfigsDFL
+  initConfigsnoDF :: InitConfigsDFL [[Z3Construct]]
   --TODO associate variable state in variable abstraction
   initConfigsnoDF acfa dea = [(CFA.initial $ cfa acfa, initt, []) | initt <- initialStates dea]
 
-  noDF :: DataFlowLogic
+  noDF :: DataFlowLogic a
   noDF _ _ (s,q,vabs) (Left t) Nothing = if s == CFA.src t
                                               then (CFA.dst t, q, vabs)
                                               else (s,q,vabs)
@@ -109,11 +110,11 @@ module ResidualAnalysis.IntraProceduralAbstractMonitoredSystem where
                                                       then (adst ast, DEA.dst dt, vabs)
                                                       else (s,q,vabs)
 
-  initConfigsSimpleDF :: InitConfigsDFL
+  initConfigsSimpleDF :: InitConfigsDFL [[Z3Construct]]
   --TODO associate variable state in variable abstraction
   initConfigsSimpleDF acfa dea = [(CFA.initial $ cfa acfa, initt, []) | initt <- initialStates dea]
 
-  simpleDF :: DataFlowLogic
+  simpleDF :: DataFlowLogic [[Z3Construct]]
   simpleDF acfa dea (s,q,vabs) (Left t) Nothing = if s == CFA.src t
                                                     then (CFA.dst t, q, vabsOf (variableAbstraction acfa) s)
                                                     else (s,q,vabs)
@@ -128,13 +129,12 @@ module ResidualAnalysis.IntraProceduralAbstractMonitoredSystem where
                                                       else (s,q,vabs)
 
 
-
 ---create DF logic with dynamic SSA
 
-  constructControlFlowABS :: AbstractCFA -> DEA -> AMS
+  constructControlFlowABS :: AbstractCFA -> DEA -> AMS [[Z3Construct]]
   constructControlFlowABS acfa dea = constructABSGeneric (initConfigsnoDF, noDF) acfa dea
 
-  constructABSGeneric :: DFLEnv -> AbstractCFA -> DEA -> AMS
+  constructABSGeneric ::  (Eq a) => DFLEnv a -> AbstractCFA -> DEA -> AMS a
   constructABSGeneric (initConfigs, dataFlow) acfa dea = let (amsTrans, amsStates, _) = exhaustiveSteps dataFlow acfa dea ([],[],initConfigs acfa dea)
                                                                                       in AMS{
                                                                                             cfaName = CFA.name $ cfa acfa,
@@ -143,18 +143,18 @@ module ResidualAnalysis.IntraProceduralAbstractMonitoredSystem where
                                                                                             evolutions = amsTrans
                                                                                           }
 
-  exhaustiveSteps :: DataFlowLogic -> AbstractCFA -> DEA -> ([AMSTransition], [AMSConfig], [AMSConfig]) -> ([AMSTransition], [AMSConfig], [AMSConfig])
+  exhaustiveSteps :: (Eq a) => DataFlowLogic a -> AbstractCFA -> DEA -> ([AMSTransition a], [AMSConfig a], [AMSConfig a]) -> ([AMSTransition a], [AMSConfig a], [AMSConfig a])
   exhaustiveSteps dataFlow acfa dea (ts,done,[]) = (ts,done,[])
   exhaustiveSteps dataFlow acfa dea (ts,done,left) = let newTrans = ts ++ (foldr (++) [] [step dataFlow c acfa dea | c <- left])
                                                          newDone = done ++ left
                                                          newLeft = (nextConfigs newTrans) \\ newDone
                                                       in exhaustiveSteps dataFlow acfa dea (newTrans, newDone, newLeft)
 
-  nextConfigs :: [AMSTransition] -> [AMSConfig]
+  nextConfigs :: [AMSTransition a] -> [AMSConfig a]
   nextConfigs [] = []
   nextConfigs (t:ts) = [to t] ++ (nextConfigs ts)
 
-  step :: DataFlowLogic -> AMSConfig -> AbstractCFA -> DEA -> [AMSTransition]
+  step :: DataFlowLogic a -> AMSConfig a -> AbstractCFA -> DEA -> [AMSTransition a]
   step dataFlow (s,q,vs) acfa dea = let outgoingCFATrans = outgoingCFATransitions s (cfa acfa)
                                         outgoingAbstractTrans = outgoingAbstractTransitions s acfa
                                         outgoingDEATrans = outgoingDEATransitions q dea
@@ -167,7 +167,7 @@ module ResidualAnalysis.IntraProceduralAbstractMonitoredSystem where
   outgoingDEATransitions :: DEA.State -> DEA.DEA -> [DEA.Transition]
   outgoingDEATransitions s dea = [t | t <- (DEA.transitions dea), s == DEA.src t]
 
-  addStatesAndTransitions :: AMS -> [AMSConfig] -> [AMSTransition] -> AMS
+  addStatesAndTransitions :: AMS a -> [AMSConfig a] -> [AMSTransition a] -> AMS a
   addStatesAndTransitions ams cs ts = AMS{
                                           cfaName = cfaName ams,
                                           deaName = deaName ams,
@@ -175,7 +175,7 @@ module ResidualAnalysis.IntraProceduralAbstractMonitoredSystem where
                                           evolutions = ts ++ (evolutions ams)
                                         }
 
-  matchConcreteTransition :: DataFlowLogic -> AbstractCFA -> DEA -> AMSConfig -> CFA.Transition -> [DEA.Transition] -> [AMSTransition]
+  matchConcreteTransition :: DataFlowLogic a -> AbstractCFA -> DEA -> AMSConfig a -> CFA.Transition -> [DEA.Transition] -> [AMSTransition a]
   matchConcreteTransition dataFlow acfa dea (s,q,vs) st [] = if s == CFA.src st
                                                             then let destConfig = (dataFlow acfa dea (s,q,vs) (Left st) Nothing)
                                                                   in [AMSTransition (s,q,vs) (Just st) Nothing destConfig]
@@ -189,7 +189,7 @@ module ResidualAnalysis.IntraProceduralAbstractMonitoredSystem where
                                                                       else rest ++ [newTransition]
                                                               else rest
 
-  matchAbstractTransition :: DataFlowLogic -> AbstractCFA -> DEA -> AMSConfig -> AbstractTransition -> [DEA.Transition] -> [AMSTransition]
+  matchAbstractTransition :: DataFlowLogic a -> AbstractCFA -> DEA -> AMSConfig a -> AbstractTransition -> [DEA.Transition] -> [AMSTransition a]
   matchAbstractTransition dataFlow acfa dea (s,q,vs) ast [] = if s == asrc ast
                                                     then let destConfig = (dataFlow acfa dea (s,q,vs) (Right ast) Nothing)
                                                           in [AMSTransition (s,q,vs) Nothing Nothing destConfig]

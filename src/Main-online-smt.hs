@@ -106,7 +106,7 @@ z3SatDisjunctive (z3s:z3ss) = do sat <- z3Sat z3s
                                             return satt
 
 
-z3SatCollective :: [Z3Construct] -> [AMSTransition] -> [AMSTransition] -> IO [AMSTransition]
+z3SatCollective :: [Z3Construct] -> [AMSTransition [[Z3Construct]]] -> [AMSTransition [[Z3Construct]]] -> IO [AMSTransition [[Z3Construct]]]
 z3SatCollective context _ [] = return []
 z3SatCollective context allAmsts ((amst):amsts) = do let proofOblig = transitionProofObligation allAmsts amst
                                                      sat <- if (proofOblig == []) then return True else z3SatDisjunctive $ [(context ++ z3) | z3 <- proofOblig]
@@ -115,13 +115,13 @@ z3SatCollective context allAmsts ((amst):amsts) = do let proofOblig = transition
                                                        then return ([amst] ++ remaining)
                                                        else return remaining
 
-onlineConstructControlFlowABSFromCFA :: DEA -> CFA -> IO AMS
+onlineConstructControlFlowABSFromCFA :: DEA -> CFA -> IO (AMS [[Z3Construct]])
 onlineConstructControlFlowABSFromCFA dea cfa = do onlineConstructControlFlowABS (abstract cfa (getEventsFromDEA dea)) dea
 
-onlineConstructControlFlowABS :: AbstractCFA -> DEA -> IO AMS
+onlineConstructControlFlowABS :: AbstractCFA -> DEA -> IO (AMS [[Z3Construct]])
 onlineConstructControlFlowABS acfa dea = onlineConstructABSGeneric (initConfigsSimpleDF, simpleDF) acfa dea
 
-onlineConstructABSGeneric :: DFLEnv -> AbstractCFA -> DEA -> IO AMS
+onlineConstructABSGeneric :: DFLEnv [[Z3Construct]] -> AbstractCFA -> DEA -> IO (AMS [[Z3Construct]])
 onlineConstructABSGeneric (initConfigs, dataFlow) acfa dea = do (amsTrans, amsStates, _) <- onlineExhaustiveSteps dataFlow acfa dea ([],[],initConfigs acfa dea)
                                                                 return AMS{
                                                                           cfaName = CFA.name $ cfa acfa,
@@ -130,7 +130,7 @@ onlineConstructABSGeneric (initConfigs, dataFlow) acfa dea = do (amsTrans, amsSt
                                                                           evolutions = amsTrans
                                                                       }
 
-onlineExhaustiveSteps :: DataFlowLogic -> AbstractCFA -> DEA -> ([AMSTransition], [AMSConfig], [AMSConfig]) -> IO ([AMSTransition], [AMSConfig], [AMSConfig])
+onlineExhaustiveSteps :: DataFlowLogic [[Z3Construct]] -> AbstractCFA -> DEA -> ([AMSTransition [[Z3Construct]]], [AMSConfig [[Z3Construct]]], [AMSConfig [[Z3Construct]]]) -> IO ([AMSTransition [[Z3Construct]]], [AMSConfig [[Z3Construct]]], [AMSConfig [[Z3Construct]]])
 onlineExhaustiveSteps dataFlow acfa dea (ts,done,[]) = return (ts,done,[])
 onlineExhaustiveSteps dataFlow acfa dea (ts,done,left) = do let potentialTransitions = (foldr (++) [] [step dataFlow c acfa dea | c <- left])
                                                             viableTransitions <- z3SatCollective (([Z3Sort s | s <- sortDecs $ cfa acfa]) ++ ([Z3Dec v | v <- varDecs $ cfa acfa])) potentialTransitions potentialTransitions
