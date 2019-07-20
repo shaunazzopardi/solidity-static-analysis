@@ -2,9 +2,8 @@
 
 {-TODO
 
-  1. Push in arrays modeled as store
+  1. Push in ArraysOrMappings modeled as store
   2. Array length function, declare type
-  3. Handle structs
 -}
 
 module SMT.SMTLib2 where
@@ -32,57 +31,22 @@ module SMT.SMTLib2 where
     display v = v
 --------------------------------------------------------------------------------
 
-  data BoolVal = BoolVal String
-                | BoolValRel GenericRelation
-                | BoolVar String deriving (Eq, Ord, Show)
------------------
-  --data GenericValues = Val String
-    --                  | Var String
-      --                | ArraySelect ArrayRels GenericRelation
-        --              | StructSelect StructRels String
-          --            | MapSelect MapRels GenericRelation
-
+  data Values = Val String
+                | ValRel GenericRelation
+                | Var String deriving (Eq, Ord, Show)
 -----------------
 
-  instance Parseable BoolVal where
-    display (BoolVal b) = b
-    display (BoolValRel b) = display b
-    display (BoolVar b) = b
+  instance Parseable Values where
+    display (Val b) = b
+    display (ValRel b) = display b
+    display (Var b) = b
 --------------------------------------------------------------------------------
-  instance VarsOf BoolVal where
-    varsOf (BoolVal b) = []
-    varsOf (BoolValRel b) = varsOf b
-    varsOf (BoolVar b) = [b]
+  instance VarsOf Values where
+    varsOf (Val b) = []
+    varsOf (ValRel b) = varsOf b
+    varsOf (Var b) = [b]
 --------------------------------------------------------------------------------
-
---------------------------------------------------------------------------------
-  --we should also allow HexVal
-
-  data NumVal = NumValRel GenericRelation
-              | IntVal String
-              | RealVal String
-              | IntVar String
-              | RealVar String deriving (Eq, Ord, Show)
-----------------
-----------------
-
-  instance Parseable NumVal where
-  --  parser = --whitespace *> (SolidityCode <$> parser) <* whitespace <* eof
-    display (NumValRel i) = display i
-    display (IntVal i) = i
-    display (RealVal d) = d
-    display (IntVar v) = v
-    display (RealVar v) = v
---------------------------------------------------------------------------------
-  instance VarsOf NumVal where
-    varsOf (NumValRel i) = varsOf i
-    varsOf (IntVal i) = []
-    varsOf (RealVal d) = []
-    varsOf (IntVar v) = [v]
-    varsOf (RealVar v) = [v]
---------------------------------------------------------------------------------
-
-  data ConditionalRels =  CBase BoolVal
+  data ConditionalRels =  CBase Values
                         | Equals GenericRelation GenericRelation
                         | And ConditionalRels ConditionalRels
                         | Or ConditionalRels ConditionalRels
@@ -116,7 +80,7 @@ module SMT.SMTLib2 where
     varsOf (Not r) = (varsOf r)
 --------------------------------------------------------------------------------
 
-  data NumberRels = NBase NumVal
+  data NumberRels = NBase Values
                   | Plus NumberRels NumberRels
                   | Minus NumberRels NumberRels
                   | Multiply NumberRels NumberRels
@@ -143,23 +107,7 @@ module SMT.SMTLib2 where
     varsOf (Mod r rr) = (varsOf r) ++ (varsOf rr)
     varsOf (PowerOf r rr) = (varsOf r) ++ (varsOf rr)
 --------------------------------------------------------------------------------
-  --we should also allow HexVal
-
-  data StringVal = StringVal String
-                  | StringVar String deriving (Eq, Ord, Show)
-----------------
-----------------
-
-  instance Parseable StringVal where
-    display (StringVal s) = s
-    display (StringVar v) = v
---------------------------------------------------------------------------------
-  instance VarsOf StringVal where
-    varsOf (StringVal s) = []
-    varsOf (StringVar v) = [v]
---------------------------------------------------------------------------------
-
-  data StringRels  = SBase StringVal
+  data StringRels  = SBase Values
                   | Concat StringRels StringRels deriving (Eq, Ord, Show)
 ---------------
 
@@ -171,43 +119,18 @@ module SMT.SMTLib2 where
     varsOf (SBase s) = varsOf s
     varsOf (Concat sr srr) = varsOf sr ++ varsOf srr
 --------------------------------------------------------------------------------
-  data ArrayVal = ArrayVar String deriving (Eq, Ord, Show)
+  data ArrayOrMappingRels = ArrayBase Values
+                | Select ArrayOrMappingRels GenericRelation deriving (Eq, Ord, Show)
 ---------------
-
-  instance Parseable ArrayVal where
-    display (ArrayVar s) = s
-  --  display (SelectArray arrayval numberRel) = "(select " ++ display arrayRel ++ " " ++ (display numberRel) ++ ")"
---------------------------------------------------------------------------------
-  instance VarsOf ArrayVal where
-    varsOf (ArrayVar s) = [s]
---------------------------------------------------------------------------------
-
-  data ArrayRels = ArrayBase ArrayVal
-                | Select ArrayRels GenericRelation deriving (Eq, Ord, Show)
----------------
-  instance Parseable ArrayRels where
+  instance Parseable ArrayOrMappingRels where
     display (ArrayBase arrayVal) = display arrayVal
     display (Select arrayRel numberRel) = "(select " ++ display arrayRel ++ " " ++ (display numberRel) ++ ")"
   --------------------------------------------------------------------------------
-  instance VarsOf ArrayRels where
+  instance VarsOf ArrayOrMappingRels where
     varsOf (ArrayBase arrayVal) = varsOf arrayVal
     varsOf (Select arrayRel numberRel) = (varsOf arrayRel) --TODO deal better with arrays
 --------------------------------------------------------------------------------
-
-  data StructVal = StructVar String
-                 | StructMemberSelect StructVal String deriving (Eq, Ord, Show)
----------------
-
-  instance Parseable StructVal where
-    display (StructVar s) = s
-    display (StructMemberSelect struct child) = display struct ++ "." ++ child
-  --------------------------------------------------------------------------------
-  instance VarsOf StructVal where
-    varsOf (StructVar s) = [s]
-    varsOf (StructMemberSelect struct child) = [v ++ "." ++ child | v <- (varsOf struct)]
---------------------------------------------------------------------------------
-
-  data StructRels = StructBase StructVal
+  data StructRels = StructBase Values
             --       | MemberStore StructRels String GenericRelation
                    | MemberSelect StructRels String
                    deriving (Eq, Ord, Show)
@@ -233,49 +156,14 @@ module SMT.SMTLib2 where
   --  display (MemberStore rel s genRell) = "(= " ++ display rel ++ "." ++ (display genRel) ++ " " ++ display genRell ++ ")"
     varsOf (MemberSelect rel genRel) = [v ++ "." ++ genRel | v <- (varsOf rel)]
 --------------------------------------------------------------------------------
-
-  data MappingVal = MappingVar String Type Type deriving (Eq, Ord, Show)
-            --      | SelectMap MappingVal GenericRelation
----------------
-
-  instance Parseable MappingVal where
-    display (MappingVar s _ _) = s
---    display (SelectMap s _ _) = "(select " ++ display rel ++ " " ++ (display genRel) ++ ")"
---------------------------------------------------------------------------------
-  instance VarsOf MappingVal where
-    varsOf (MappingVar s _ _) = [s]
---------------------------------------------------------------------------------
-
-  data MappingRels = MappingBase MappingVal
-            --       | MapStore MappingRels GenericRelation GenericRelation
-                   | MapSelect MappingRels GenericRelation deriving (Eq, Ord, Show)
----------------
-
-  baseTypeOfMap :: MappingRels -> Type
-  baseTypeOfMap (MappingBase (MappingVar _ t tt)) = tt
---  baseTypeOfMap (MapStore rel _ _) = baseTypeOfMap rel
-  baseTypeOfMap (MapSelect rel _) = baseTypeOfMap rel
----------------
-  instance Parseable MappingRels where
-    display (MappingBase val) = display val
-  --  display (MapStore rel genRel genRell) = "(store " ++ display rel ++ " " ++ (display genRel) ++ " " ++ display genRell ++ ")"
-    display (MapSelect rel genRel) = "(select " ++ display rel ++ " " ++ (display genRel) ++ ")"
-    --------------------------------------------------------------------------------
-  instance VarsOf MappingRels where
-    varsOf (MappingBase val) = varsOf val
-    --  display (MapStore rel genRel genRell) = "(store " ++ display rel ++ " " ++ (display genRel) ++ " " ++ display genRell ++ ")"
-    varsOf (MapSelect rel genRel) = (varsOf rel)
---------------------------------------------------------------------------------
-
   --the other here is for variables of Uniterpreted type, or enum, or struct
-  data GenericRelation = Cond ConditionalRels | Numb NumberRels | Arrays ArrayRels | Mapping MappingRels | Strings StringRels | Structs StructRels | Other String  deriving (Eq, Ord, Show)
+  data GenericRelation = Cond ConditionalRels | Numb NumberRels | ArraysOrMappings ArrayOrMappingRels | Strings StringRels | Structs StructRels | Other String  deriving (Eq, Ord, Show)
 ---------------
 
   instance Parseable GenericRelation where
     display (Cond condRel) = display condRel
     display (Numb numRel) = display numRel
-    display (Arrays arrayRel) = display arrayRel
-    display (Mapping rel) = display rel
+    display (ArraysOrMappings arrayRel) = display arrayRel
     display (Strings rel) = display rel
     display (Structs rel) = display rel
 --    display (Function s) = display s
@@ -285,8 +173,7 @@ module SMT.SMTLib2 where
   instance VarsOf GenericRelation where
     varsOf (Cond condRel) = varsOf condRel
     varsOf (Numb numRel) = varsOf numRel
-    varsOf (Arrays arrayRel) = varsOf arrayRel
-    varsOf (Mapping rel) = varsOf rel
+    varsOf (ArraysOrMappings arrayRel) = varsOf arrayRel
     varsOf (Strings rel) = varsOf rel
     varsOf (Structs rel) = varsOf rel
 --    display (Function s) = display s
@@ -349,10 +236,10 @@ module SMT.SMTLib2 where
   typeOfElType (UfixedType _) = Real
 
   constraintsOfElType :: ElementaryTypeName -> VarName -> [Z3Construct]
-  constraintsOfElType (IntType Nothing) name = [Z3Assert $ Assert $ Rel (Less (NBase $ IntVar (display name)) (PowerOf (NBase $ IntVal $ show 2) (NBase $ IntVal (show 256))))]
-  constraintsOfElType (UintType Nothing) name = [Z3Assert $ Assert $ Rel (Greater (NBase $ IntVar (display name)) (NBase $ IntVal $ show 0)), Z3Assert $ Assert $ Rel (Less (NBase $ IntVar (display name)) (PowerOf (NBase $ IntVal $ show 2) (NBase $ IntVal (show 256))))]
-  constraintsOfElType (IntType (Just no)) name = [Z3Assert $ Assert $ Rel (Less (NBase $ IntVar (display name)) (PowerOf (NBase $ IntVal $ show 2) (NBase $ IntVal (show no))))]
-  constraintsOfElType (UintType (Just no)) name = [Z3Assert $ Assert $ Rel (Greater (NBase $ IntVar (display name)) (NBase $ IntVal $ show 0)), Z3Assert $ Assert $ Rel (Less (NBase $ IntVar (display name)) (PowerOf (NBase $ IntVal $ show 2) (NBase $ IntVal $ show no)))]
+  constraintsOfElType (IntType Nothing) name = [Z3Assert $ Assert $ Rel (Less (NBase $ Var (display name)) (PowerOf (NBase $ Val $ show 2) (NBase $ Val (show 256))))]
+  constraintsOfElType (UintType Nothing) name = [Z3Assert $ Assert $ Rel (Greater (NBase $ Var (display name)) (NBase $ Val $ show 0)), Z3Assert $ Assert $ Rel (Less (NBase $ Var (display name)) (PowerOf (NBase $ Val $ show 2) (NBase $ Val (show 256))))]
+  constraintsOfElType (IntType (Just no)) name = [Z3Assert $ Assert $ Rel (Less (NBase $ Var (display name)) (PowerOf (NBase $ Val $ show 2) (NBase $ Val (show no))))]
+  constraintsOfElType (UintType (Just no)) name = [Z3Assert $ Assert $ Rel (Greater (NBase $ Var (display name)) (NBase $ Val $ show 0)), Z3Assert $ Assert $ Rel (Less (NBase $ Var (display name)) (PowerOf (NBase $ Val $ show 2) (NBase $ Val $ show no)))]
   constraintsOfElType _ _ = []
 
 -------------

@@ -113,13 +113,13 @@ module SMT.SolidityToSMTLib2 where
 --  data BasicValue = Val String | Var String
 
   primaryExprRel :: PrimaryExpression -> Maybe GenericRelation
-  primaryExprRel (PrimaryExpressionBooleanLiteral (BooleanLiteral literal)) = (Just $ Cond $ CBase $ BoolVal literal)
-  primaryExprRel (PrimaryExpressionNumberLiteral ((NumberLiteralDec stringNum Nothing))) = (Just $ Numb $ NBase $ IntVal stringNum)
+  primaryExprRel (PrimaryExpressionBooleanLiteral (BooleanLiteral literal)) = (Just $ Cond $ CBase $ Val literal)
+  primaryExprRel (PrimaryExpressionNumberLiteral ((NumberLiteralDec stringNum Nothing))) = (Just $ Numb $ NBase $ Val stringNum)
   primaryExprRel (PrimaryExpressionNumberLiteral numberMaybeWithUnits) = (Just $ Other (display numberMaybeWithUnits)) --TODO
   primaryExprRel (PrimaryExpressionHexLiteral (HexLiteral literal)) = (Just $ Other literal) --TODO
   primaryExprRel (PrimaryExpressionIdentifier (Identifier literal)) = (Just $ Other literal)
   primaryExprRel (PrimaryExpressionTupleExpression tupleExpression) = (Just $ Other $ display tupleExpression)
-  primaryExprRel (PrimaryExpressionStringLiteral (StringLiteral literal)) = (Just $ Strings $ SBase $ StringVal literal)
+  primaryExprRel (PrimaryExpressionStringLiteral (StringLiteral literal)) = (Just $ Strings $ SBase $ Val literal)
   primaryExprRel (PrimaryExpressionElementaryTypeNameExpression typeName) = (Nothing)
 
 --------------
@@ -134,13 +134,13 @@ module SMT.SolidityToSMTLib2 where
 
   exprRelGenRelation (Unary "!" expr) = case exprRelGenRelation expr of
                                                                         Just (Cond condRel) -> Just (Cond $ Not condRel)
-                                                                        Just v -> (Just (Cond $ Not $ Equals v (Cond $ CBase $ BoolVal ("true"))))
+                                                                        Just v -> (Just (Cond $ Not $ Equals v (Cond $ CBase $ Val ("true"))))
                                                                   --      Just v -> (Just (Cond $ Not (CBase $ BoolVar (display v))))
                                                                         v -> (Just $ Other "ERROR")
 
 
   exprRelGenRelation (Binary "[]" expr exprr) = case (exprRelGenRelation expr, exprRelGenRelation exprr) of
-                                                                          (Just v, Just vv) -> Just $ Arrays $ Select (ArrayBase $ ArrayVar (display v)) vv
+                                                                          (Just v, Just vv) -> Just $ ArraysOrMappings $ Select (ArrayBase $ Var (display v)) vv
                                                                           _ -> (Just $ Other "ERROR")
 
   exprRelGenRelation (Binary "+" expr exprr) = case (exprRelGenRelation expr, exprRelGenRelation exprr) of
@@ -148,27 +148,27 @@ module SMT.SolidityToSMTLib2 where
                                                                           (Just (Strings rel), Just (Strings rell)) -> Just (Strings $ Concat rel rell)
                                                                           --assuming variables are numbers
                                                                           --TODO in SMTLib2 language ignore types and simply consider operations over variables
-                                                                          (Just v, Just vv) -> Just (Numb $ Plus (NBase $ NumValRel v) (NBase $ NumValRel vv))
+                                                                          (Just v, Just vv) -> Just (Numb $ Plus (NBase $ ValRel v) (NBase $ ValRel vv))
 --                                                                          (Just v, Just vv) -> Just (Numb $ Plus (NBase $ IntVar (display v)) (NBase $ IntVar (display vv))) --not necessarily a number here TODO check type of vaiable from ssaContext
                                                                           _ -> Just $ Other "ERROR"
 
   exprRelGenRelation (Binary "-" expr exprr) = case (exprRelGenRelation expr, exprRelGenRelation exprr) of
-                                                                          (Just v, Just vv) -> Just (Numb $ Minus (NBase $ NumValRel v) (NBase $ NumValRel vv))
+                                                                          (Just v, Just vv) -> Just (Numb $ Minus (NBase $ ValRel v) (NBase $ ValRel vv))
                                                                           _ -> Just $ Other "ERROR"
 
 
   exprRelGenRelation (Binary "*" expr exprr) = case (exprRelGenRelation expr, exprRelGenRelation exprr) of
-                                                                          (Just v, Just vv) -> Just (Numb $ Multiply (NBase $ NumValRel v) (NBase $ NumValRel vv))
+                                                                          (Just v, Just vv) -> Just (Numb $ Multiply (NBase $ ValRel v) (NBase $ ValRel vv))
                                                                           _ -> Just $ Other "ERROR"
 
 
   exprRelGenRelation (Binary "/" expr exprr) = case (exprRelGenRelation expr, exprRelGenRelation exprr) of
-                                                                          (Just v, Just vv) -> Just (Numb $ Div (NBase $ NumValRel v) (NBase $ NumValRel vv))
+                                                                          (Just v, Just vv) -> Just (Numb $ Div (NBase $ ValRel v) (NBase $ ValRel vv))
                                                                           _ -> Just $ Other "ERROR"
 
 
   exprRelGenRelation (Binary "%" expr exprr) = case (exprRelGenRelation expr, exprRelGenRelation exprr) of
-                                                                          (Just v, Just vv) -> Just (Numb $ Mod (NBase $ NumValRel v) (NBase $ NumValRel vv))
+                                                                          (Just v, Just vv) -> Just (Numb $ Mod (NBase $ ValRel v) (NBase $ ValRel vv))
                                                                           _ -> Just $ Other "ERROR"
 
   --exprRelGenRelation ssaContext (Binary "^" expr exprr) = case (exprRelGenRelation ssaContext expr, exprRelGenRelation ssaContext exprr) of
@@ -177,13 +177,13 @@ module SMT.SolidityToSMTLib2 where
         --                                                                  _ -> Just $ Other "ERROR"
 
   exprRelGenRelation (Binary "&" expr exprr) = case (exprRelGenRelation expr, exprRelGenRelation exprr) of
-                                                                          (Just v, Just vv) -> Just (Cond $ And (CBase $ BoolValRel v) (CBase $ BoolValRel vv))
+                                                                          (Just v, Just vv) -> Just (Cond $ And (CBase $ ValRel v) (CBase $ ValRel vv))
                                                                           _ -> Just $ Other "ERROR"
 
   exprRelGenRelation (Binary "&&" expr exprr) = exprRelGenRelation (Binary "&" expr exprr)
 
   exprRelGenRelation (Binary "|" expr exprr) = case (exprRelGenRelation expr, exprRelGenRelation exprr) of
-                                                                          (Just v, Just vv) -> Just (Cond $ Or (CBase $ BoolValRel v) (CBase $ BoolValRel vv))
+                                                                          (Just v, Just vv) -> Just (Cond $ Or (CBase $ ValRel v) (CBase $ ValRel vv))
                                                                           -- (Just (Cond rel), Just (Cond rell)) -> Just (Cond $ Or rel rell)
                                                                           -- (Just v, Just vv) -> Just (Cond $ Or (CBase $ BoolVar (display v)) (CBase $ BoolVar (display vv)))
                                                                           v -> (Just $ Other "ERROR")
@@ -191,24 +191,24 @@ module SMT.SolidityToSMTLib2 where
   exprRelGenRelation (Binary "||" expr exprr) = exprRelGenRelation (Binary "|" expr exprr)
 
   exprRelGenRelation (Binary ">" expr exprr) = case (exprRelGenRelation expr, exprRelGenRelation exprr) of
-                                                                          (Just v, Just vv) -> Just (Cond $ Greater (NBase $ NumValRel v) (NBase $ NumValRel vv))
+                                                                          (Just v, Just vv) -> Just (Cond $ Greater (NBase $ ValRel v) (NBase $ ValRel vv))
                                                                       --    (Just (Numb rel), Just (Numb rell)) -> Just (Cond $ Greater rel rell)
                                                                         --  (Just v, Just vv) -> Just (Cond $ Greater (NBase $ IntVar (display v)) (NBase $ IntVar (display vv)))
                                                                           _ -> Just $ Other "ERROR"
 
 
   exprRelGenRelation (Binary ">=" expr exprr) = case (exprRelGenRelation expr, exprRelGenRelation exprr) of
-                                                                          (Just v, Just vv) -> Just (Cond $ GreaterOrEqual (NBase $ NumValRel v) (NBase $ NumValRel vv))
+                                                                          (Just v, Just vv) -> Just (Cond $ GreaterOrEqual (NBase $ ValRel v) (NBase $ ValRel vv))
                                                                           _ -> Just $ Other "ERROR"
 
 
   exprRelGenRelation (Binary "<" expr exprr) = case (exprRelGenRelation expr, exprRelGenRelation exprr) of
-                                                                          (Just v, Just vv) -> Just (Cond $ Less (NBase $ NumValRel v) (NBase $ NumValRel vv))
+                                                                          (Just v, Just vv) -> Just (Cond $ Less (NBase $ ValRel v) (NBase $ ValRel vv))
                                                                           _ -> Just $ Other "ERROR"
 
 
   exprRelGenRelation (Binary "<=" expr exprr) = case (exprRelGenRelation expr, exprRelGenRelation exprr) of
-                                                                          (Just v, Just vv) -> Just (Cond $ LessOrEqual (NBase $ NumValRel v) (NBase $ NumValRel vv))
+                                                                          (Just v, Just vv) -> Just (Cond $ LessOrEqual (NBase $ ValRel v) (NBase $ ValRel vv))
                                                                           _ -> Just $ Other "ERROR"
 
 
@@ -222,9 +222,9 @@ module SMT.SolidityToSMTLib2 where
 
   exprRelGenRelation (MemberAccess expr (Identifier member)) = let maybeStructVal = exprRelGenRelation expr
                                                                    newMaybeGenRel = case maybeStructVal of
-                                                                                                                --  Just (Other var) -> Just $ Structs $ (MemberSelect (StructBase $ StructVar var) member)
-                                                                                          Just (Structs (MemberSelect (StructBase (StructVar var)) memberr)) -> Just $ Structs $ MemberSelect (MemberSelect (StructBase $ StructVar var) memberr) member
-                                                                                          Just v -> Just $ Structs $ (MemberSelect (StructBase $ StructVar (display v)) member)
+                                                                                                                --  Just (Other var) -> Just $ Structs $ (MemberSelect (StructBase $ Var var) member)
+                                                                                          Just (Structs (MemberSelect (StructBase (Var var)) memberr)) -> Just $ Structs $ MemberSelect (MemberSelect (StructBase $ Var var) memberr) member
+                                                                                          Just v -> Just $ Structs $ (MemberSelect (StructBase $ Var (display v)) member)
                                                                                           _ -> (Just $ Other "ERROR")
                                                                                     in newMaybeGenRel
 --matches FunctionCallExpressionList
