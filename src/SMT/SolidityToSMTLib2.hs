@@ -9,9 +9,9 @@
 
 module SMT.SolidityToSMTLib2 where
 
-  import DEA.DEA
+  import DEA.DEA hiding (Less, LessOrEqual)
   import CFG.CFG
-  import Solidity.Solidity
+  import Solidity.Solidity hiding (Less, LessOrEqual)
   import SMT.SMTLib2
   import Debug.Trace
 -------------
@@ -78,15 +78,18 @@ module SMT.SolidityToSMTLib2 where
                                                           Nothing -> ([],[])
                                                           Just assertRel -> ([],[assertRel])
 
-  statementRel (SimpleStatementVariableDeclaration (variableDec) Nothing) = let varName = unIdentifier $ variableDeclarationName variableDec
-                                                                                varType = typeOfTypeName $ variableDeclarationType variableDec
-                                                                              in ([Dec varName varType], [])
 
-  statementRel (SimpleStatementVariableDeclaration (variableDec) (Just expr)) = let varName = variableDeclarationName variableDec
-                                                                                    varType = typeOfTypeName $ variableDeclarationType variableDec
-                                                                                    (_,assertRels) = statementRel (SimpleStatementExpression $ Binary "=" (Literal (PrimaryExpressionIdentifier varName)) expr)
-                                                                                    (decAssignDecs, assertRelss) = statementRel (SimpleStatementVariableDeclaration (variableDec) Nothing)
-                                                                                  in (decAssignDecs, assertRels ++ assertRelss)
+  statementRel (SimpleStatementVariableDeclarationList ((Just dec):des) (expr:exprs)) = let varName = variableDeclarationName dec
+                                                                                            varType = typeOfTypeName $ variableDeclarationType dec
+                                                                                            (_,assertRels) = statementRel (SimpleStatementExpression $ Binary "=" (Literal (PrimaryExpressionIdentifier varName)) expr)
+                                                                                            (otherDecs, otherRels) = statementRel (SimpleStatementVariableDeclarationList ((Just dec):des) (expr:exprs))
+                                                                                          in ([Dec (unIdentifier varName) varType] ++ otherDecs, assertRels ++ otherRels)
+
+  -- statementRel (SimpleStatementVariableDeclaration (variableDec) (Just expr)) = let varName = variableDeclarationName variableDec
+  --                                                                                   varType = typeOfTypeName $ variableDeclarationType variableDec
+  --                                                                                   (_,assertRels) = statementRel (SimpleStatementExpression $ Binary "=" (Literal (PrimaryExpressionIdentifier varName)) expr)
+  --                                                                                   (decAssignDecs, assertRelss) = statementRel (SimpleStatementVariableDeclaration (variableDec) Nothing)
+  --                                                                                 in (decAssignDecs, assertRels ++ assertRelss)
   statementRel _ = ([], [])
   --TODO  ?? statementRel sortDec ssaContext (SimpleStatementVariableList IdentifierList (Maybe Expression)) = exprRel sortDec ssaContext expression
 -------------
@@ -105,7 +108,7 @@ module SMT.SolidityToSMTLib2 where
 -------------
   parameterListDec :: ParameterList -> [VarDeclaration]
   parameterListDec (ParameterList []) = []
-  parameterListDec (ParameterList ((Parameter typ (Just (Identifier name))):rest)) = ([Dec name (typeOfTypeName typ)] ++ (parameterListDec (ParameterList rest)))
+  parameterListDec (ParameterList ((Parameter typ _ (Just (Identifier name))):rest)) = ([Dec name (typeOfTypeName typ)] ++ (parameterListDec (ParameterList rest)))
 -------------
   parameterListDec (ParameterList (x:rest)) = (parameterListDec (ParameterList rest))
 -------------

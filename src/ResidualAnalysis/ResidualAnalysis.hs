@@ -26,7 +26,7 @@ module ResidualAnalysis.ResidualAnalysis where
 
   subDEA :: DEA -> [DEA.Transition] -> DEA
   subDEA dea trans = DEA{
-                    daeName = daeName dea,
+                    deaName = deaName dea,
                     allStates = nub ([DEA.src t | t <- DEA.transitions dea] ++ [DEA.dst t | t <- DEA.transitions dea]),
                     initialStates = initialStates dea,
                     DEA.transitions = nub [t | t <- trans, elem t (DEA.transitions dea)],
@@ -36,7 +36,7 @@ module ResidualAnalysis.ResidualAnalysis where
 
   guardResidual :: (Eq a) => [AMS a] -> DEA -> DEA
   guardResidual amss dea =  DEA{
-                              daeName = daeName dea,
+                              deaName = deaName dea,
                               allStates = allStates dea,
                               initialStates = initialStates dea,
                               DEA.transitions = guardResidual' amss (DEA.transitions dea),

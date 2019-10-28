@@ -27,83 +27,158 @@ import DEA.DEA
 import DEA.Parsing
 import Solidity
 
+import Debug.Trace
+
 instrumentContractSpecification :: ContractSpecification -> Instrumentation
 instrumentContractSpecification monitor =
   -- (i)  Rename contract to LARVA_contract
-  renameContract (contract, contract') |>
+    renameContract (contract, contract') |>
 
   -- (ii) Add LARVA_Status handlers
-  -- Add the modifier to check that the contract is enabled to all functions (except the old and new constructors)
-  addTopModifierToAllButTheseFunctionInContract
-    contract' [contract] (Identifier "LARVA_ContractIsEnabled", ExpressionList []) |>
-      -- Add the second modifier to the old constructor
-  addTopModifierToFunctionInContract
-    contract' contract (Identifier "LARVA_Constructor", ExpressionList []) |>
 
+    addContractParts contract' (
+      map parser'
+        [ 
+          -- Enumerated type to keep track whether contract is enabled or not.
+          "enum LARVA_STATUS { NOT_STARTED, READY, RUNNING, STOPPED }"
+          -- Functionality to enable and disable the original contract
+          , "function LARVA_EnableContract() private { LARVA_Status = (LARVA_Status == LARVA_STATUS.NOT_STARTED)?LARVA_STATUS.READY:LARVA_STATUS.RUNNING; }"
+          , "function LARVA_DisableContract() private { LARVA_Status = (LARVA_Status == LARVA_STATUS.READY)?LARVA_STATUS.NOT_STARTED:LARVA_STATUS.STOPPED; }"
+          -- LARVA_status keeps track of the current status of the contract
+          ,"LARVA_STATUS private LARVA_Status = LARVA_STATUS.NOT_STARTED;"
+          -- Modifier to ensure that the contract has been enabled
+          , "modifier LARVA_ContractIsEnabled { require(LARVA_Status == LARVA_STATUS.RUNNING); _; }"        ]) |>  
+    
+    -- Add the modifier to check that the contract is enabled to all functions (except to any old style constructors)
+    addTopModifierToAllButTheseFunctionInContract
+    contract' [contract'] (Identifier "LARVA_ContractIsEnabled", ExpressionList []) |>
 
-  addContractParts contract' (
-    map parser'
-    [ -- Enumerated type to keep track whether contract is (i) not started (initially in ths state); (ii) ready
-      -- (after the contract has been enabled but the constructor not yet called); (iii) running (enabled and
-      -- constructor called); (iv) stopped (contract disabled after it was running).
-      "enum LARVA_STATUS { NOT_STARTED, READY, RUNNING, STOPPED }"
-      -- LARVA_status keeps track of the current status of the contract
-    , "LARVA_STATUS private LARVA_Status = LARVA_STATUS.NOT_STARTED;"
-      -- Functionality to enable and disable the original contract
-    , "function LARVA_EnableContract() private { LARVA_Status = (LARVA_Status == LARVA_STATUS.NOT_STARTED)?LARVA_STATUS.READY:LARVA_STATUS.RUNNING; }"
-    , "function LARVA_DisableContract() private { LARVA_Status = (LARVA_Status == LARVA_STATUS.READY)?LARVA_STATUS.NOT_STARTED:LARVA_STATUS.STOPPED; }"
-      -- Modifier to ensure that the contract has been enabled
-    , "modifier LARVA_ContractIsEnabled { require(LARVA_Status == LARVA_STATUS.RUNNING); _; }"
-      -- Modifier to be added to the old constructor to ensure tha it is ready to be called and to set the status
-      -- to running after terminating succesfully
-    , "modifier LARVA_Constructor { require(LARVA_Status == LARVA_STATUS.READY); LARVA_Status = LARVA_STATUS.RUNNING; _; }"
-    ]
-  ) |>
-   -- (iii) Add declarations, and constructor, reparation, satisfaction functions of new contract
-  addContractParts contract' (
-    [ (ContractPartFunctionDefinition
-        (Just contract') (ParameterList [])
-        [FunctionDefinitionTagPublic]
-        Nothing
-        (Just $ initialisation monitor)
-      )
-    , (ContractPartFunctionDefinition
-        (Just $ Identifier "LARVA_reparation") (ParameterList [])
-        [FunctionDefinitionTagPrivate]
-        Nothing
-        (Just $ reparation monitor)
-      )
-    , (ContractPartFunctionDefinition
-        (Just $ Identifier "LARVA_satisfaction") (ParameterList [])
-        [FunctionDefinitionTagPrivate]
-        Nothing
-        (Just $ satisfaction monitor)
-      )
-    ] ++ declarations monitor
-  ) |>
+  --(iii) Deal with monitor constructors and status of monitor
 
-  -- (iv) Add setters for relevant variables
-  foldl (.) id
-  [ defineAndUseSetterFunctionForVariableInContract contract' v
-        (Identifier ("LARVA_set_"++vn++"_pre"), Identifier ("LARVA_set_"++vn++"_post"))
-  | v <- getVariablesFromContractSpecification monitor
-  , let vn = display v
-  ] |>
+    --rename old-style constructor to new contract name
+    renameFunctionInContract contract' (contract, contract') |>
+
+    --Add constructor if constructor not defined
+    (\x ->  if constructorIsDefinedInContract contract' x
+              then x
+              else if (useNewStyleConstructor x)
+                  then (addContractParts contract' 
+                                    [ (ContractPartConstructorDefinition
+                                        (ParameterList [])
+                                        [FunctionDefinitionTagPublic]
+                                        (Just $ Block [])
+                                        )] x)
+                  else (addContractParts contract' 
+                                  [ (ContractPartFunctionDefinition
+                                      (Just contract') (ParameterList [])
+                                      [FunctionDefinitionTagPublic]
+                                      Nothing
+                                      (Just $ Block [])
+                                    )] x)) |>
+
+      --If there the initialisation and declaration code has no enabling logic (i.e. no call to function LARVA_EnableContract) in the monitor 
+      --  then simply set the monitor to running
+      --  otherwise set the monitor initially to not started
+      --            and if the declaration code has no enabling logic
+      --                    then add a modifier that includes logic to execute the monitor initialisation code and then the original constructor
+      --                         and if the original smart contract has no constructor then create one
+      --                         and then add the just created modifier to the existing constructor
+      --                    else turn the old constructor (if any) into a normal function 
+      --                         and allow it to be executed only if the status of the monitor is READY
+      --                         and create a new constructor containing the initialisation code of the monitor
+    (if (not $ monitorDeclarationsHasCustomEnablingLogic monitor) && (not $ monitorInitialisationHasCustomEnablingLogic monitor) 
+              then --rename old constructor to new contractname if using old style constructor (will only have effect if this is present)
+                    addContractParts contract'
+                      (map parser' [
+                        -- Modifier to be added to the old constructor to ensure that it is ready to be called and to set the status
+                        -- to running after terminating succesfully
+                      "modifier LARVA_Constructor {" ++ (display $ initialisation monitor) ++ "LARVA_Status = LARVA_STATUS.RUNNING; _; }"
+                      ]) |> 
+                      addTopModifierToContractConstructor 
+                      contract' (Identifier "LARVA_Constructor", ExpressionList []) 
+              else ((if monitorInitialisationHasCustomEnablingLogic monitor
+                          then addContractParts contract' 
+                                (map parser' [
+                                  -- Modifier to be added to the old constructor to ensure that it is ready to be called and to set the status
+                                  -- to running after terminating succesfully
+                                 "modifier LARVA_Constructor {" ++ (display $ initialisation monitor) ++"require(LARVA_Status == LARVA_STATUS.READY); LARVA_Status = LARVA_STATUS.RUNNING; _; }"
+                                ]) |>
+                                addTopModifierToContractConstructor 
+                                contract' (Identifier "LARVA_Constructor", ExpressionList []) 
+                          else addContractParts contract' 
+                                (map parser' [
+                                  -- Modifier to be added to the old constructor to ensure that it is ready to be called and to set the status
+                                  -- to running after terminating succesfully
+                                 "modifier LARVA_Constructor { require(LARVA_Status == LARVA_STATUS.READY); LARVA_Status = LARVA_STATUS.RUNNING; _; }"
+                                ]) |>
+                                renameFunctionInContract contract' (contract', (Identifier ((unIdentifier contract) ++ "Constructor"))) |>
+                    
+                                renameConstructorInContract contract' (Identifier ((unIdentifier contract) ++ "Constructor")) |>
+                                addTopModifierToFunctionInContract
+                                contract' (Identifier ((unIdentifier contract) ++ "Constructor")) (Identifier "LARVA_Constructor", ExpressionList [])
+                                 |>
+                                (\x -> if (useNewStyleConstructor x)
+                                          then (addContractParts contract' 
+                                                            [ (ContractPartConstructorDefinition
+                                                                (ParameterList [])
+                                                                [FunctionDefinitionTagPublic]
+                                                                (Just $ initialisation monitor)
+                                                              )] x)
+                                          else (addContractParts contract' 
+                                                          [ (ContractPartFunctionDefinition
+                                                              (Just contract') (ParameterList [])
+                                                              [FunctionDefinitionTagPublic]
+                                                              Nothing
+                                                              (Just $ initialisation monitor)
+                                                            )] x))
+                    )
+                    
+                    )
+    ) |>
+
+  -- (iv) Add reparation and satisfaction functions if they are not empty and there are respectively bad and acceptance states,
+  --       and the declaration code of monitored contract
+    addContractParts contract' (
+      (if reparation monitor /= Block [] && [s | dea <- deas monitor, s <- badStates dea] /= []
+          then  [(ContractPartFunctionDefinition
+                  (Just $ Identifier "LARVA_reparation") (ParameterList [])
+                  [FunctionDefinitionTagPrivate]
+                  Nothing
+                  (Just $ reparation monitor)
+                )]
+          else []) ++
+      (if satisfaction monitor /= Block [] && [s | dea <- deas monitor, s <- acceptanceStates dea] /= []
+          then  [(ContractPartFunctionDefinition
+                  (Just $ Identifier "LARVA_satisfaction") (ParameterList [])
+                  [FunctionDefinitionTagPrivate]
+                  Nothing
+                  (Just $ satisfaction monitor)
+                )]
+          else []) ++ declarations monitor
+    ) |>
+
+  -- (v) Add setters for relevant variables
+    foldl (.) id
+    [ defineAndUseSetterFunctionForVariableInContract contract' v
+          (Identifier ("LARVA_set_"++vn++"_pre"), Identifier ("LARVA_set_"++vn++"_post"))
+    | v <- getVariablesFromContractSpecification monitor
+    , let vn = display v
+    ] |>
 
   -- Start instrumenting the DEAs
-  -- (v) Add variables to store state of each DEA: LARVA_STATE_n, all initialised to 0.
-  addContractParts contract'
-    [ parser' ("int8 "++larva_state_variable n++" = 0;") | n <- [1..daeCount] ] |>
+  -- (vi) Add variables to store state of each DEA: LARVA_STATE_n, all initialised to 0.
+    addContractParts contract'
+      [ parser' ("int8 "++larva_state_variable n++" = 0;") | n <- [1..deaCount] ] |>
 
-  -- (vi) Create modifiers to catch events and change state + attach modifiers to relevant functions
-  foldl (|>) id [ instrumentForDEA contract' (n,d) | (n,d) <- zip [1..] ds ]
+  -- (vii) Create modifiers to catch events and change state + attach modifiers to relevant functions
+    foldl (|>) id [ instrumentForDEA contract' (n,d) | (n,d) <- zip [1..] ds ]
 
   where
     contract = contractName monitor
     contract' = Identifier $ "LARVA_" ++ display contract
 
-    ds = daes monitor
-    daeCount = length ds
+    ds = deas monitor
+    deaCount = length ds
 
     larva_state_variable n = "LARVA_STATE_"++show n
 
@@ -112,14 +187,14 @@ instrumentContractSpecification monitor =
     f |> g = g . f
 
     instrumentForDEA :: ContractName -> (Int, DEA) -> Instrumentation
-    instrumentForDEA contractName (daeNumber, dae) code =
+    instrumentForDEA contractName (deaNumber, dea) code =
         foldl (|>) id (
           map instrumentForEvent $
             -- this returns (event, transitions which trigger on this event for this automaton)
             map (\ets -> (fst $ head ets, map snd ets)) $
               -- this groups the transitions by event
               groupBy (\(e,_) (e',_) -> sameEvent e e') $
-                sortOn fst [ (event $ label t, t) | t <- transitions dae ]
+                sortOn fst [ (event $ label t, t) | t <- transitions dea ]
         ) code
       where
         sameEvent (UponEntry f) (UponEntry f') = f==f'
@@ -127,20 +202,20 @@ instrumentContractSpecification monitor =
         sameEvent (VariableAssignment v _) (VariableAssignment v' _) = v==v'
         sameEvent _ _ = False
 
-        modifierCode :: String -> Maybe ParameterList -> Bool -> [Transition] -> String
-        modifierCode modifierName mps before ts =
+        modifierCode :: SolidityCode -> ContractName -> String -> Maybe ParameterList -> Bool -> [Transition] -> String
+        modifierCode code contract modifierName mps before ts =
           unlines $
             [ "modifier "++modifierName++maybe "" display mps++" {"] ++
             (if before then [] else ["_;"]) ++
-            [ "if (("++larva_state_variable daeNumber++" == "++stateNumber (src t)++")"++
+            [ "if (("++larva_state_variable deaNumber++" == "++stateNumber (src t)++")"++
               maybe "" (\cond -> " && ("++display cond++")") (guard gcl) ++
               maybe "" (\cond -> " && ("++display cond++")") condition ++
-              ") { "++larva_state_variable daeNumber++" = "++stateNumber (dst t)++";"++
+              ") { "++larva_state_variable deaNumber++" = "++stateNumber (dst t)++";"++
               display (action gcl)++reparationCode++satisfactionCode++"} else {"
             | t <- ts, let gcl = label t
             , let condition = variableAssignmentExpression gcl
-            , let reparationCode = if dst t `elem` badStates dae then " LARVA_reparation(); " else ""
-            , let satisfactionCode = if dst t `elem` acceptanceStates dae then " LARVA_satisfaction(); " else ""
+            , let reparationCode = if dst t `elem` badStates dea && functionIsDefinedInContract contract (Identifier "LARVA_reparation") code then " LARVA_reparation(); " else ""
+            , let satisfactionCode = if dst t `elem` acceptanceStates dea && functionIsDefinedInContract contract (Identifier "LARVA_satisfaction") code then " LARVA_satisfaction(); " else ""
             ] ++
             [ "   "++ replicate (length ts) '}' ] ++
             (if before then ["_;"] else []) ++
@@ -153,13 +228,13 @@ instrumentContractSpecification monitor =
 
         nameModifier :: Event -> String
         nameModifier (UponEntry fc) =
-          "LARVA_DEA_"++show daeNumber++"_handle_before_"++display (functionName fc)++
+          "LARVA_DEA_"++show deaNumber++"_handle_before_"++display (functionName fc)++
           maybe "__no_parameters" (\ps -> "__parameters_"++intercalate "_" (map display $ fromUntypedParameterList ps)) (parametersPassed fc)
         nameModifier (UponExit fc) =
-          "LARVA_DEA_"++show daeNumber++"_handle_after_"++display (functionName fc)++
+          "LARVA_DEA_"++show deaNumber++"_handle_after_"++display (functionName fc)++
           maybe "__no_parameters" (\ps -> "__parameters_"++intercalate "_" (map display $ fromUntypedParameterList ps)) (parametersPassed fc)
         nameModifier (VariableAssignment vn _) =
-          "LARVA_DEA_"++show daeNumber++"_handle_after_assignment_"++display vn
+          "LARVA_DEA_"++show deaNumber++"_handle_after_assignment_"++display vn
 
 
         instrumentForEvent :: (Event, [Transition]) -> Instrumentation
@@ -176,14 +251,14 @@ instrumentContractSpecification monitor =
 
               eventUntypedParameters = parametersPassed functionCall
               eventTypedParameters =
-                maybe Nothing (\ps -> Just (typeParameterList ps functionTypedParameters)) eventUntypedParameters
+                maybe Nothing (\ps -> Just (addMemoryLocationToParametersList $ typeParameterList ps functionTypedParameters)) eventUntypedParameters
 
               modifierName =  nameModifier e
           in  -- Add modifier to function
               addTopModifierToFunctionInContract contractName function
                 (Identifier modifierName, functionParameters) |> (
               -- Define modifier to trigger transitions
-              addContractPart contractName $ parser' $ modifierCode modifierName eventTypedParameters True ts
+              (\x -> (addContractPart contractName $ parser' $ modifierCode x contractName modifierName eventTypedParameters True ts) x)
               )
         instrumentForEvent (e@(UponExit functionCall), ts) =
           let function = functionName functionCall
@@ -198,19 +273,19 @@ instrumentContractSpecification monitor =
 
               eventUntypedParameters = parametersPassed functionCall
               eventTypedParameters =
-                maybe Nothing (\ps -> Just (typeParameterList ps functionTypedParameters)) eventUntypedParameters
+                maybe Nothing (\ps -> Just (addMemoryLocationToParametersList $ typeParameterList ps functionTypedParameters)) eventUntypedParameters
 
               modifierName = nameModifier e
           in -- Add modifier to function
              addTopModifierToFunctionInContract contractName function
                (Identifier modifierName, functionParameters) |> (
              -- Define modifier to trigger transitions
-             addContractPart contractName $ parser' $ modifierCode modifierName eventTypedParameters True ts
+             (\x -> (addContractPart contractName $ parser' $ modifierCode x contractName modifierName eventTypedParameters True ts) x)
              )
         instrumentForEvent (e@(VariableAssignment variableName _), ts) =
           let modifierName =  nameModifier e
           in  -- Define modifier to trigger transitions
-              (addContractPart contractName $ parser' $ modifierCode modifierName Nothing False ts) |>
+              (\x -> (addContractPart contractName $ parser' $ modifierCode x contractName modifierName Nothing False ts) x)|>
               -- Add modifier to setter functions
               addTopModifierToFunctionsInContract contractName
                 [ Identifier ("LARVA_set_"++display variableName++"_pre")
@@ -221,11 +296,63 @@ instrumentContractSpecification monitor =
 
         stateNumber stateName = show $ fromJust $ elemIndex stateName ss
           where
-            s0 = initialState dae
-            ss = s0: (allStates dae \\ [s0])
+            s0 = initialState dea
+            ss = s0: (allStates dea \\ [s0])
 
 
 instrumentSpecification :: Specification -> Instrumentation
 instrumentSpecification specification =
   foldl (\f c -> instrumentContractSpecification c . f) id (contractSpecifications specification)
 
+-----------------------
+
+-- IfStatement Expression Statement (Maybe Statement)
+--   | WhileStatement Expression Statement
+--   | InlineAssemblyStatement (Maybe StringLiteral) InlineAssemblyBlock
+--   | ForStatement (Maybe Statement, Maybe Expression, Maybe Expression) Statement
+--   | BlockStatement Block
+
+--   | DoWhileStatement Statement Expression
+--   | PlaceholderStatement
+--   | Continue
+--   | Break
+--   | Return (Maybe Expression)
+--   | Throw
+--   | EmitStatement Expression
+
+--   | SimpleStatementExpression Expression
+--   | SimpleStatementVariableList IdentifierList (Maybe Expression)
+--  -- | SimpleStatementVariableDeclaration VariableDeclaration (Maybe Expression)
+--   | SimpleStatementVariableDeclarationList [Maybe VariableDeclaration] [Expression]
+--   | SimpleStatementVariableAssignmentList [Maybe Identifier] [Expression]
+
+monitorDeclarationsHasCustomEnablingLogic :: ContractSpecification -> Bool
+monitorDeclarationsHasCustomEnablingLogic monitor = (["" | (ContractPartFunctionDefinition _ _ _ _ (Just b)) <- declarations monitor, containsCallToFunction (Identifier "LARVA_EnableContract") (BlockStatement b)] /= [])
+
+monitorInitialisationHasCustomEnablingLogic :: ContractSpecification -> Bool
+monitorInitialisationHasCustomEnablingLogic monitor = (containsCallToFunction (Identifier "LARVA_EnableContract") (BlockStatement (initialisation monitor)))
+
+containsCallToFunction :: FunctionName -> Statement -> Bool
+containsCallToFunction f (IfStatement _ stmt Nothing) = containsCallToFunction f stmt
+containsCallToFunction f (IfStatement _ stmt (Just stmtt)) = containsCallToFunction f stmt || containsCallToFunction f stmtt
+containsCallToFunction f (WhileStatement _ stmt) = containsCallToFunction f stmt
+containsCallToFunction f (DoWhileStatement stmt _) = containsCallToFunction f stmt
+containsCallToFunction f (ForStatement (Nothing, _, _) stmt) = containsCallToFunction f stmt
+containsCallToFunction f (ForStatement ((Just stmtt), _, _) stmt) = containsCallToFunction f stmt || containsCallToFunction f stmtt
+containsCallToFunction f (SimpleStatementExpression expr) = exprContainsCallToFunction f expr
+containsCallToFunction f (BlockStatement (Block (s:stmts))) = containsCallToFunction f s || containsCallToFunction f (BlockStatement (Block stmts))
+containsCallToFunction _ _ = False
+
+exprContainsCallToFunction :: FunctionName -> Expression -> Bool
+exprContainsCallToFunction f (Unary _ ex) = exprContainsCallToFunction f ex
+exprContainsCallToFunction f (Binary _ e1 e2) = exprContainsCallToFunction f e1 || exprContainsCallToFunction f e2
+exprContainsCallToFunction f (Ternary _ e1 e2 e3) = exprContainsCallToFunction f e1 || exprContainsCallToFunction f e2 || exprContainsCallToFunction f e3
+exprContainsCallToFunction f (FunctionCallNameValueList e1 Nothing) = exprContainsCallToFunction f e1
+exprContainsCallToFunction f (FunctionCallNameValueList e1 (Just (NameValueList nameValueList))) = exprContainsCallToFunction f e1 || nameValueListContainsCall f nameValueList
+                                                                                where nameValueListContainsCall f [] = False
+                                                                                      nameValueListContainsCall f ((_,e):rest) = exprContainsCallToFunction f e || nameValueListContainsCall f (rest)
+
+exprContainsCallToFunction f (FunctionCallExpressionList e Nothing) = exprContainsCallToFunction f e
+exprContainsCallToFunction f (FunctionCallExpressionList e (Just (ExpressionList exs))) = exprContainsCallToFunction f e || (foldr (||) False (map (exprContainsCallToFunction f) exs))
+exprContainsCallToFunction f (Literal (PrimaryExpressionIdentifier ff)) = f == ff
+exprContainsCallToFunction _ _ = False

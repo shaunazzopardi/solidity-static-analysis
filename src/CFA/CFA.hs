@@ -4,7 +4,7 @@ module CFA.CFA where
 
   import Data.List
   import qualified DEA.DEA as DEA
-  import DEA.Parsing
+  import qualified DEA.Parsing
   import SMT.SMTLib2
   import Data.List
   import Control.Monad hiding (guard)

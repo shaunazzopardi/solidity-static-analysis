@@ -74,14 +74,14 @@ module ResidualAnalysis.IntraProceduralAbstractMonitoredSystem where
   transitionProofObligation _ _ = []
 
   data AMS a = AMS{
-                cfaName :: String,
-                deaName :: String,
+                cfaLabel :: String,
+                deaLabel :: String,
                 configs :: [AMSConfig a],
                 evolutions :: [AMSTransition a]
               } deriving (Eq, Ord, Show)
 
   instance Parseable a => Parseable (AMS a) where
-    display (AMS cfaName deaName configs evols) =  "digraph \"" ++ (display cfaName ++ " || " ++ display deaName) ++ "\"{\n" ++
+    display (AMS cfaLabel deaLabel configs evols) =  "digraph \"" ++ (display cfaLabel ++ " || " ++ display deaLabel) ++ "\"{\n" ++
                                                 foldr (++) "" (map display (evols)) ++
                                                 "\n}\n"
 
@@ -137,8 +137,8 @@ module ResidualAnalysis.IntraProceduralAbstractMonitoredSystem where
   constructABSGeneric ::  (Eq a) => DFLEnv a -> AbstractCFA -> DEA -> AMS a
   constructABSGeneric (initConfigs, dataFlow) acfa dea = let (amsTrans, amsStates, _) = exhaustiveSteps dataFlow acfa dea ([],[],initConfigs acfa dea)
                                                                                       in AMS{
-                                                                                            cfaName = CFA.name $ cfa acfa,
-                                                                                            deaName = daeName dea,
+                                                                                            cfaLabel = CFA.name $ cfa acfa,
+                                                                                            deaLabel = deaName dea,
                                                                                             configs = amsStates,
                                                                                             evolutions = amsTrans
                                                                                           }
@@ -169,8 +169,8 @@ module ResidualAnalysis.IntraProceduralAbstractMonitoredSystem where
 
   addStatesAndTransitions :: AMS a -> [AMSConfig a] -> [AMSTransition a] -> AMS a
   addStatesAndTransitions ams cs ts = AMS{
-                                          cfaName = cfaName ams,
-                                          deaName = deaName ams,
+                                          cfaLabel = cfaLabel ams,
+                                          deaLabel = deaLabel ams,
                                           configs = cs ++ (configs ams),
                                           evolutions = ts ++ (evolutions ams)
                                         }

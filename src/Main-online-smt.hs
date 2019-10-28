@@ -124,8 +124,8 @@ onlineConstructControlFlowABS acfa dea = onlineConstructABSGeneric (initConfigsS
 onlineConstructABSGeneric :: DFLEnv [[Z3Construct]] -> AbstractCFA -> DEA -> IO (AMS [[Z3Construct]])
 onlineConstructABSGeneric (initConfigs, dataFlow) acfa dea = do (amsTrans, amsStates, _) <- onlineExhaustiveSteps dataFlow acfa dea ([],[],initConfigs acfa dea)
                                                                 return AMS{
-                                                                          cfaName = CFA.name $ cfa acfa,
-                                                                          deaName = daeName dea,
+                                                                          cfaLabel = CFA.name $ cfa acfa,
+                                                                          deaLabel = deaName dea,
                                                                           configs = amsStates,
                                                                           evolutions = amsTrans
                                                                       }

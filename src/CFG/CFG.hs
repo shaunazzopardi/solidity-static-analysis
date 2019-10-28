@@ -601,14 +601,17 @@ cfgStepWithStatement (SimpleStatementVariableList identifierList Nothing) cfg st
                     let transition = Transition{src = state, dst = StatementState (nextLabel cfg) ((SimpleStatementVariableList identifierList Nothing)), condition = TT}
                         in ((addState (addTransition cfg transition) (dst transition)), dst transition)
 
-cfgStepWithStatement (SimpleStatementVariableDeclaration variableDeclaration Nothing) cfg state =
-                    let transition = Transition{src = state, dst = StatementState (nextLabel cfg) ((SimpleStatementVariableDeclaration variableDeclaration Nothing)), condition = TT}
-                        in ((addState (addTransition cfg transition) (dst transition)), dst transition)
+cfgStepWithStatement (SimpleStatementVariableDeclarationList [] []) cfg state = (cfg, state)
 
-cfgStepWithStatement (SimpleStatementVariableDeclaration variableDeclaration (Just expr)) cfg state =
-                     let (newCFG, newState) = cfgStepWithExpression expr cfg state
-                         transition = Transition{src = newState, dst = StatementState (nextLabel newCFG) ((SimpleStatementVariableDeclaration variableDeclaration (Just expr))), condition = TT}
-                        in ((addState (addTransition newCFG transition) (dst transition)), dst transition)
+cfgStepWithStatement (SimpleStatementVariableDeclarationList ((Just dec):decs) (exp:exps)) cfg state =
+                    let (intermedCFG, intermedState) = cfgStepWithExpression exp cfg state
+                        decTransition = Transition{src = intermedState, dst = StatementState (nextLabel intermedCFG) (SimpleStatementVariableDeclarationList [Just dec] [exp]), condition = TT}
+                        (newCFG, newState) = ((addState (addTransition intermedCFG decTransition) (dst decTransition)), dst decTransition)
+                      in cfgStepWithStatement (SimpleStatementVariableDeclarationList decs exps) newCFG newState
+
+cfgStepWithStatement (SimpleStatementVariableDeclarationList ((Nothing):decs) (exp:exps)) cfg state =
+                    let (newCFG, newState) = cfgStepWithExpression exp cfg state
+                      in cfgStepWithStatement (SimpleStatementVariableDeclarationList decs exps) newCFG newState
 
 cfgStepWithStatement (BlockStatement (Block [])) cfg state =  (cfg, state)
 cfgStepWithStatement (BlockStatement (Block (s : statements))) cfg state =  let (newCFG, newState) = cfgStepWithStatement s cfg state

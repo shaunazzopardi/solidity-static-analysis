@@ -16,7 +16,7 @@ module SMT.SMTLib2 where
   import Debug.Trace
 
   import Parseable
-  import Solidity.Solidity
+  import Solidity.Solidity hiding (Less, LessOrEqual)
 
   import Data.List
 

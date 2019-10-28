@@ -10,7 +10,7 @@ module ResidualAnalysis.DEAResiduals where
 
   deaSyncComp :: DEA.DEA -> DEA.DEA -> DEA.DEA
   deaSyncComp dea1 dea2 =  DEA.DEA{
-                                DEA.daeName = (DEA.daeName dea1) ++ " || " ++ (DEA.daeName dea2),
+                                DEA.deaName = (DEA.deaName dea1) ++ " || " ++ (DEA.deaName dea2),
                                 DEA.allStates = [toCombinedState s1 s2 | s1 <- DEA.allStates dea1, s2 <- DEA.allStates dea2],
                                 DEA.initialStates = [toCombinedState s1 s2 | s1 <- DEA.initialStates dea1, s2 <- DEA.initialStates dea2],
                                 DEA.transitions = deasSyncTransitons dea1 dea2,
@@ -59,7 +59,7 @@ module ResidualAnalysis.DEAResiduals where
                                   uselessStates = (DEA.allStates dea \\ usefulStates)
                                   usefulTransitions = [transition | transition <- DEA.transitions dea, elem (DEA.src transition) usefulStates, elem (DEA.dst transition) usefulStates]
                                   in DEA.DEA{
-                                    DEA.daeName = DEA.daeName dea,
+                                    DEA.deaName = DEA.deaName dea,
                                     DEA.allStates = usefulStates,
                                     DEA.initialStates = DEA.initialStates dea,
                                     DEA.transitions = usefulTransitions,
