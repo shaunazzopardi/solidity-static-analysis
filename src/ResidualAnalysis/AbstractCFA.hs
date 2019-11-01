@@ -72,15 +72,17 @@ module ResidualAnalysis.AbstractCFA where
 
 ---------------------------------------------------------------------------------
 --TODO we should be abstracting outside behaviour through an abstract initial state, an abstract end state, and an abstract call state (and tag those by invariants of the program)
-  abstract :: CFA -> [DEA.Event] -> AbstractCFA
-  abstract cfa events = AbstractCFA cfa (abstractOutsideBehaviour cfa events) (abstractDF cfa)
+  abstract :: CFA -> [CFA] -> AbstractCFA
+  abstract cfa cfas = AbstractCFA cfa (abstractOutsideBehaviour cfa cfas) (abstractDF cfa)
 ---------------------------
 ---Control-flow abstraction
 ---------------------------
-  abstractOutsideBehaviour :: CFA -> [DEA.Event] -> [AbstractTransition]
-  abstractOutsideBehaviour cfa events = [AbstractTransition endState endState (DEAEvent e) | e <- events, endState <- CFA.end cfa]
+  abstractOutsideBehaviour :: CFA -> [CFA] -> [AbstractTransition]
+  abstractOutsideBehaviour cfa cfas = let events = [e | cf <- cfas, CFA.Transition _ _ _ _ (DEAEvent e) <- CFA.transitions cf] 
+                                          onlyOutsideEvents = [e | cf <- cfas \\ [cfa], CFA.Transition _ _ _ _ (DEAEvent e) <- CFA.transitions cf] 
+                                        in [AbstractTransition endState endState (DEAEvent e) | e <- onlyOutsideEvents, endState <- CFA.end cfa]
                                                   ++ [AbstractTransition (CFA.initial cfa) (initial cfa) (DEAEvent e) | e <- events]
-                                                  ++ [AbstractTransition c c (DEAEvent e) | e <- events, c <- callStatesOf (calls cfa)]
+                                                  ++ [AbstractTransition c c (DEAEvent e) | e <- onlyOutsideEvents, c <- callStatesOf (calls cfa)]
 -----------------------------------------------------------------
   callStatesOf :: [Call] -> [CFA.State]
   callStatesOf [] = []

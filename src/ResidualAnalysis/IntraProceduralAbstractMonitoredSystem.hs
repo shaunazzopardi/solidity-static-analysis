@@ -14,7 +14,10 @@ module ResidualAnalysis.IntraProceduralAbstractMonitoredSystem where
   import SMT.SolidityToSMTLib2
   import Parseable
 
-  --need to add ssacontext to config
+  --This module provides to functionality to create an abstraction of the runtime monitored system
+
+  --The abstraction of a program state at runtime, with *a* representing the type of data abstraction chosen.
+  --[[Z3Construct]] is one choice for *a*, representing the disjunction of conjunction of Z3construct 
   type AMSConfig a = (CFA.State, DEA.State, a)
 
   instance Parseable [[Z3Construct]] where
@@ -22,9 +25,6 @@ module ResidualAnalysis.IntraProceduralAbstractMonitoredSystem where
       display ([]:[[]]) = ""
       display (va:[]) = (foldr (++) "" (map display va))
       display (va:vabs) = (foldr (++) "" (map display va)) ++ " OR " ++ display vabs
-
-  -- instance Eq AMSConfig where
-  --   (==) (s,q,z3) (ss,qq,z33) = (s == ss) && (q == qq) && (z3 == z33)
 
   instance Parseable a => Parseable (AMSConfig a) where
     display (s,q,a) = "(" ++ display s ++ ", " ++ display q ++ ", " ++  display a ++ ")"

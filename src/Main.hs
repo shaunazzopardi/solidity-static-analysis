@@ -65,9 +65,9 @@ main =
         `failWith` ("Cannot read DEA file <"++inDEAFile++">")
       dea <- parseIO inDEAFile inputDEAText
       let outCFAs = (instrumentSC solidityCode dea)
-      amss <- mapM (onlineConstructControlFlowABSFromCFA dea) outCFAs
+      amss <- mapM (onlineConstructControlFlowABSFromCFA dea outCFAs) outCFAs
       let cfaText = (foldr (++) "" (map display outCFAs))
-          acfas = map (\cfa -> abstract cfa (getEventsFromDEA dea)) outCFAs
+          acfas = map (\cfa -> abstract cfa outCFAs) outCFAs
           acfaText = (foldr (++) "" (map display (acfas)))
           amssText = (foldr (++) "" (map display amss))
           residualDEA = reachibilityReduction $ bothResiduals amss dea
@@ -115,8 +115,8 @@ z3SatCollective context allAmsts ((amst):amsts) = do let proofOblig = transition
                                                        then return ([amst] ++ remaining)
                                                        else return remaining
 
-onlineConstructControlFlowABSFromCFA :: DEA -> CFA -> IO (AMS [[Z3Construct]])
-onlineConstructControlFlowABSFromCFA dea cfa = do onlineConstructControlFlowABS (abstract cfa (getEventsFromDEA dea)) dea
+onlineConstructControlFlowABSFromCFA :: DEA -> [CFA] -> CFA -> IO (AMS [[Z3Construct]])
+onlineConstructControlFlowABSFromCFA dea cfas cfa = do onlineConstructControlFlowABS (abstract cfa cfas) dea
 
 onlineConstructControlFlowABS :: AbstractCFA -> DEA -> IO (AMS [[Z3Construct]])
 onlineConstructControlFlowABS acfa dea = onlineConstructABSGeneric (initConfigsSimpleDF, simpleDF) acfa dea
