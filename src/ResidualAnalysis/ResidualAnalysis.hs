@@ -2,7 +2,7 @@ module ResidualAnalysis.ResidualAnalysis where
 
   import Solidity.Solidity
   import ResidualAnalysis.AbstractCFA
-  import ResidualAnalysis.IntraProceduralAbstractMonitoredSystem as AMS
+  import ResidualAnalysis.IntraAMS as AMS
   import DEA.DEA as DEA
   import CFA.CFA as CFA
   import SMT.SMTLib2

@@ -1,0 +1,11 @@
+source-repository-package
+  type: git
+  location: git://github.com/shaunazzopardi/solidity-cfg-builder.git
+  subdir: ./
+
+source-repository-package
+  type: git
+  location: git://github.com/shaunazzopardi/contractlarva.git
+  subdir: ./
+
+packages: ./solidity-static-analysis.cabal

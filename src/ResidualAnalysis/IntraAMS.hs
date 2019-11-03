@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleInstances, TypeSynonymInstances, MultiParamTypeClasses  #-}
 
-module ResidualAnalysis.IntraProceduralAbstractMonitoredSystem where
+--IntraAMS == IntraProceduralAbstractMonitoredSystem
+module ResidualAnalysis.IntraAMS where
 
   import Data.List
   import Numeric.Natural

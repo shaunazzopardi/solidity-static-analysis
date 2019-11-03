@@ -11,9 +11,9 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-module ResidualAnalysis (module ResidualAnalysis.AbstractCFA, module ResidualAnalysis.IntraProceduralAbstractMonitoredSystem, module ResidualAnalysis.ResidualAnalysis, module ResidualAnalysis.DEAResiduals) where
+module ResidualAnalysis (module ResidualAnalysis.AbstractCFA, module ResidualAnalysis.IntraAMS, module ResidualAnalysis.ResidualAnalysis, module ResidualAnalysis.DEAResiduals) where
 
-  import ResidualAnalysis.IntraProceduralAbstractMonitoredSystem
+  import ResidualAnalysis.IntraAMS
   import ResidualAnalysis.AbstractCFA
   import ResidualAnalysis.ResidualAnalysis
   import ResidualAnalysis.DEAResiduals hiding (usesEvent)

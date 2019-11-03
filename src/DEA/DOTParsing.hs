@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-module DEA.Parsing (
+module DEA.DOTParsing (
   module Parseable, module DEA.DEA
 ) where
 
@@ -55,8 +55,8 @@ commaSep1 p =
 
 
 instance Parseable Specification where
-  dotDisplay = intercalate "\n" . map display . contractSpecifications
-  dotParser = whitespace *> (Specification <$> (many parser <* whitespace)) <* eof
+  display = intercalate "\n" . map display . contractSpecifications
+  parser = whitespace *> (Specification <$> (many parser <* whitespace)) <* eof
 
 instance Parseable ContractSpecification where
   display monitor = unlines $
@@ -67,7 +67,7 @@ instance Parseable ContractSpecification where
     , "initialisation ", display (initialisation monitor)
     , "reparation ", display (reparation monitor)
     , "satisfaction ", display (satisfaction monitor)
-    ] ++ map display (daes monitor) ++ ["}"]
+    ] ++ map display (deas monitor) ++ ["}"]
     where
       indentLineList = map ("   "++)
       indentLines line = concat [ if (c=='\n') then "\n   " else [c] | c <- line ]
@@ -85,7 +85,7 @@ instance Parseable ContractSpecification where
         (try (readKeyword "reparation" *> whitespace *> parser) <|> return (Block [])) <* whitespace
       _satisfaction <-
         (try (readKeyword "satisfaction" *> whitespace *> parser) <|> return (Block [])) <* whitespace
-      _daes <- many (parser <* whitespace)
+      _deas <- many (parser <* whitespace)
       _ <- char '}'
       return $ ContractSpecification {
         contractName = _contractName,
@@ -93,20 +93,20 @@ instance Parseable ContractSpecification where
         initialisation = _initialisation,
         satisfaction = _satisfaction,
         reparation = _reparation,
-        daes = _daes
+        deas = _deas
       }
 
 instance Parseable DEA where
   parser =
     do
-      _daeName <- readKeyword "DEA" *> whitespace *> readIdentifier <* whitespace <* char '{' <* whitespace
+      _deaName <- readKeyword "DEA" *> whitespace *> readIdentifier <* whitespace <* char '{' <* whitespace
       (_allStates, _initialStates, _badStates, _acceptanceStates) <- readStates <* whitespace
       _transitions <-
         readKeyword "transitions" *> whitespace *> char '{' *> whitespace *>
         many (parser <* whitespace) <* char '}' <* whitespace
       _ <- char '}' <* whitespace
       return DEA {
-          daeName = _daeName,
+          deaName = _deaName,
           allStates = _allStates,
           initialStates = _initialStates,
           transitions = _transitions,
@@ -135,7 +135,7 @@ instance Parseable DEA where
 
   display dae =
     unlines $
-      [ "DEA "++daeName dae ++" {"
+      [ "DEA "++deaName dae ++" {"
       , "   states {"
       ] ++
       [ "     " ++ display state ++ describe state ++ ";"
